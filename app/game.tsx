@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   useColorScheme,
   Platform,
+  Image,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -23,7 +24,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Game constants
-const BIRD_SIZE = 40;
+const BIRD_SIZE = 50;
 const GRAVITY = 0.6;
 const JUMP_VELOCITY = -12;
 const PIPE_WIDTH = 60;
@@ -37,8 +38,8 @@ interface Pipe {
   passed: boolean;
 }
 
-export default function FlappyFrenzyGame() {
-  console.log('User opened Flappy Frenzy game');
+export default function FlappybaraGame() {
+  console.log('User opened Flappybara game');
   
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -234,10 +235,13 @@ export default function FlappyFrenzyGame() {
           <Text style={[styles.scoreText, { color: colors.text }]}>{score}</Text>
         </View>
 
-        {/* Bird */}
-        <Animated.View style={[styles.bird, birdStyle, { backgroundColor: colors.bird }]}>
-          <View style={[styles.birdWing, { backgroundColor: colors.birdAccent }]} />
-          <View style={[styles.birdEye, { backgroundColor: '#000' }]} />
+        {/* Capybara */}
+        <Animated.View style={[styles.bird, birdStyle]}>
+          <Image
+            source={require('@/assets/images/52b1c166-be40-4bd1-be77-9f6625ab8726.png')}
+            style={styles.capybaraImage}
+            resizeMode="contain"
+          />
         </Animated.View>
 
         {/* Pipes */}
@@ -285,7 +289,7 @@ export default function FlappyFrenzyGame() {
         {/* Start/Game Over overlay */}
         {(!gameStarted || gameOver) && (
           <View style={[styles.overlay, { backgroundColor: colors.overlay }]}>
-            <Text style={[styles.title, { color: colors.text }]}>Flappy Frenzy</Text>
+            <Text style={[styles.title, { color: colors.text }]}>Flappybara</Text>
             
             {gameOver && (
               <View style={styles.gameOverContainer}>
@@ -344,29 +348,11 @@ const styles = StyleSheet.create({
     left: SCREEN_WIDTH / 2 - BIRD_SIZE / 2,
     width: BIRD_SIZE,
     height: BIRD_SIZE,
-    borderRadius: BIRD_SIZE / 2,
     zIndex: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
   },
-  birdWing: {
-    position: 'absolute',
-    right: -8,
-    top: BIRD_SIZE / 2 - 8,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-  },
-  birdEye: {
-    position: 'absolute',
-    right: 8,
-    top: 12,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  capybaraImage: {
+    width: '100%',
+    height: '100%',
   },
   pipe: {
     position: 'absolute',
