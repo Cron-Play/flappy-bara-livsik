@@ -9,6 +9,7 @@ import {
   useColorScheme,
   Platform,
   Image,
+  Pressable,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -24,10 +25,10 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Game constants - ADJUSTED FOR SLOWER, EASIER GAMEPLAY
+// Game constants - ADJUSTED FOR SMOOTHER, LESS VIOLENT GAMEPLAY
 const BIRD_SIZE = 70; // Increased from 60 to make capybara slightly bigger
 const GRAVITY = 0.4; // Decreased from 0.5 for slower fall (less gravity)
-const JUMP_VELOCITY = -11; // Adjusted for new gravity
+const JUMP_VELOCITY = -8; // REDUCED from -11 to -8 for less violent jumping
 const PIPE_WIDTH = 60;
 const PIPE_GAP = 180;
 const PIPE_SPEED = 1.5; // Decreased from 2 for slower game speed
@@ -183,9 +184,9 @@ export default function FlappybaraGame() {
       birdVelocity.current += GRAVITY;
       birdY.value += birdVelocity.current;
 
-      // Update bird rotation based on velocity
-      const targetRotation = Math.min(Math.max(birdVelocity.current * 3, -30), 90);
-      birdRotation.value = withTiming(targetRotation, { duration: 100 });
+      // Update bird rotation based on velocity - smoother rotation
+      const targetRotation = Math.min(Math.max(birdVelocity.current * 2.5, -25), 70);
+      birdRotation.value = withTiming(targetRotation, { duration: 150 });
 
       // PRECISE COLLISION DETECTION - Only die on actual collision, not proximity
       // Add small collision margin (5px) to make it more forgiving
@@ -267,20 +268,29 @@ export default function FlappybaraGame() {
     }
   };
 
-  // Jump
+  // Jump - smoother, less violent
   const jump = () => {
     if (!gameStarted || gameOver) return;
     console.log('User tapped to jump');
     birdVelocity.current = JUMP_VELOCITY;
+    // Smoother rotation animation
     birdRotation.value = withSequence(
-      withTiming(-30, { duration: 100 }),
-      withTiming(0, { duration: 200 })
+      withTiming(-25, { duration: 150 }),
+      withTiming(0, { duration: 250 })
     );
   };
 
-  // Tap gesture
+  // Handle screen tap - works anywhere on screen during gameplay
+  const handleScreenTap = () => {
+    console.log('User tapped screen');
+    if (gameStarted && !gameOver) {
+      jump();
+    }
+  };
+
+  // Tap gesture for the entire screen
   const tapGesture = Gesture.Tap().onStart(() => {
-    runOnJS(jump)();
+    runOnJS(handleScreenTap)();
   });
 
   // Cleanup on unmount
@@ -297,7 +307,10 @@ export default function FlappybaraGame() {
 
   return (
     <GestureDetector gesture={tapGesture}>
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Pressable 
+        style={[styles.container, { backgroundColor: colors.background }]}
+        onPress={handleScreenTap}
+      >
         {/* Clouds in background - Enhanced visibility */}
         {clouds.map((cloud, index) => (
           <React.Fragment key={index}>
@@ -432,7 +445,7 @@ export default function FlappybaraGame() {
             )}
           </View>
         )}
-      </View>
+      </Pressable>
     </GestureDetector>
   );
 }
