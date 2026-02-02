@@ -1,34 +1,35 @@
+
 {
   "expo": {
-    "name": "FlappyBara",
-    "slug": "FlappyBara",
+    "name": "Flappybara",
+    "slug": "Flappybara",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/natively-dark.png",
+    "icon": "./assets/images/26a0cb07-896d-4e69-809c-a0af20358a05.webp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/natively-dark.png",
+      "image": "./assets/images/26a0cb07-896d-4e69-809c-a0af20358a05.webp",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#87CEEB"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.Natively",
+      "bundleIdentifier": "com.anonymous.Flappybara",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/natively-dark.png",
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/images/26a0cb07-896d-4e69-809c-a0af20358a05.webp",
+        "backgroundColor": "#87CEEB"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.Natively"
+      "package": "com.anonymous.Flappybara"
     },
     "web": {
-      "favicon": "./assets/images/final_quest_240x240.png",
+      "favicon": "./assets/images/26a0cb07-896d-4e69-809c-a0af20358a05.webp",
       "bundler": "metro"
     },
     "plugins": [
@@ -36,13 +37,12 @@
       "expo-router",
       "expo-web-browser"
     ],
-    "scheme": "FlappyBara",
+    "scheme": "Flappybara",
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "router": {}
     }
-  },
-  "scheme": "Flappy Frenzy"
+  }
 }
