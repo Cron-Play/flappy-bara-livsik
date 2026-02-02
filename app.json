@@ -1,8 +1,7 @@
-
 {
   "expo": {
-    "name": "Flappybara",
-    "slug": "Flappybara",
+    "name": "FlappyBara",
+    "slug": "flappy-bara-livsik",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/26a0cb07-896d-4e69-809c-a0af20358a05.webp",
@@ -26,7 +25,7 @@
         "backgroundColor": "#87CEEB"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.Flappybara"
+      "package": "com.cronplay.flappybara"
     },
     "web": {
       "favicon": "./assets/images/26a0cb07-896d-4e69-809c-a0af20358a05.webp",
@@ -37,12 +36,13 @@
       "expo-router",
       "expo-web-browser"
     ],
-    "scheme": "Flappybara",
+    "scheme": "FlappyBara",
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "router": {}
+      "router": {},
+      "backendUrl": "https://bqxenf5sggpkudj3eamw4xu7bhsktbxk.app.specular.dev"
     }
   }
 }
