@@ -33,6 +33,13 @@ const PIPE_GAP = 180;
 const PIPE_SPEED = 1.5; // Decreased from 2 for slower game speed
 const GROUND_HEIGHT = 100;
 
+// Cloud configuration - Enhanced for better visibility
+const NUM_CLOUDS = 8; // Increased from 5 for more clouds
+const CLOUD_MIN_SIZE = 80; // Increased minimum size
+const CLOUD_MAX_SIZE = 150; // Increased maximum size
+const CLOUD_MIN_SPEED = 0.3; // Slightly faster minimum
+const CLOUD_MAX_SPEED = 0.8; // Slightly faster maximum
+
 interface Pipe {
   x: number;
   topHeight: number;
@@ -87,18 +94,18 @@ export default function FlappybaraGame() {
     overlay: isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.9)',
     button: isDark ? '#3498db' : '#2980b9',
     buttonText: '#ffffff',
-    cloud: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)',
+    cloud: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.9)',
   };
 
-  // Initialize clouds on mount
+  // Initialize clouds on mount - Enhanced distribution
   useEffect(() => {
     const initialClouds: Cloud[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < NUM_CLOUDS; i++) {
       initialClouds.push({
-        x: Math.random() * SCREEN_WIDTH,
-        y: Math.random() * (SCREEN_HEIGHT - GROUND_HEIGHT - 200) + 50,
-        size: Math.random() * 60 + 40,
-        speed: Math.random() * 0.3 + 0.2,
+        x: (SCREEN_WIDTH / NUM_CLOUDS) * i + Math.random() * (SCREEN_WIDTH / NUM_CLOUDS),
+        y: Math.random() * (SCREEN_HEIGHT - GROUND_HEIGHT - 250) + 50,
+        size: Math.random() * (CLOUD_MAX_SIZE - CLOUD_MIN_SIZE) + CLOUD_MIN_SIZE,
+        speed: Math.random() * (CLOUD_MAX_SPEED - CLOUD_MIN_SPEED) + CLOUD_MIN_SPEED,
       });
     }
     setClouds(initialClouds);
@@ -291,46 +298,47 @@ export default function FlappybaraGame() {
   return (
     <GestureDetector gesture={tapGesture}>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        {/* Clouds in background */}
+        {/* Clouds in background - Enhanced visibility */}
         {clouds.map((cloud, index) => (
-          <View
-            key={index}
-            style={[
-              styles.cloud,
-              {
-                left: cloud.x,
-                top: cloud.y,
-                width: cloud.size,
-                height: cloud.size * 0.6,
-                backgroundColor: colors.cloud,
-              },
-            ]}
-          >
+          <React.Fragment key={index}>
             <View
               style={[
-                styles.cloudPart,
+                styles.cloud,
                 {
-                  left: cloud.size * 0.2,
-                  top: cloud.size * 0.1,
-                  width: cloud.size * 0.4,
-                  height: cloud.size * 0.4,
+                  left: cloud.x,
+                  top: cloud.y,
+                  width: cloud.size,
+                  height: cloud.size * 0.6,
                   backgroundColor: colors.cloud,
                 },
               ]}
-            />
-            <View
-              style={[
-                styles.cloudPart,
-                {
-                  right: cloud.size * 0.2,
-                  top: cloud.size * 0.05,
-                  width: cloud.size * 0.35,
-                  height: cloud.size * 0.35,
-                  backgroundColor: colors.cloud,
-                },
-              ]}
-            />
-          </View>
+            >
+              <View
+                style={[
+                  styles.cloudPart,
+                  {
+                    left: cloud.size * 0.2,
+                    top: cloud.size * 0.1,
+                    width: cloud.size * 0.4,
+                    height: cloud.size * 0.4,
+                    backgroundColor: colors.cloud,
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.cloudPart,
+                  {
+                    right: cloud.size * 0.2,
+                    top: cloud.size * 0.05,
+                    width: cloud.size * 0.35,
+                    height: cloud.size * 0.35,
+                    backgroundColor: colors.cloud,
+                  },
+                ]}
+              />
+            </View>
+          </React.Fragment>
         ))}
 
         {/* Score */}
