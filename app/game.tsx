@@ -18,24 +18,32 @@ import Animated, {
   Easing,
   cancelAnimation,
   runOnJS,
+  withRepeat,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Game constants
-const BIRD_SIZE = 50;
-const GRAVITY = 0.6;
-const JUMP_VELOCITY = -12;
+// Game constants - ADJUSTED FOR SLOWER, EASIER GAMEPLAY
+const BIRD_SIZE = 70; // Increased from 60 to make capybara slightly bigger
+const GRAVITY = 0.4; // Decreased from 0.5 for slower fall (less gravity)
+const JUMP_VELOCITY = -11; // Adjusted for new gravity
 const PIPE_WIDTH = 60;
 const PIPE_GAP = 180;
-const PIPE_SPEED = 3;
+const PIPE_SPEED = 1.5; // Decreased from 2 for slower game speed
 const GROUND_HEIGHT = 100;
 
 interface Pipe {
   x: number;
   topHeight: number;
   passed: boolean;
+}
+
+interface Cloud {
+  x: number;
+  y: number;
+  size: number;
+  speed: number;
 }
 
 export default function FlappybaraGame() {
@@ -59,6 +67,10 @@ export default function FlappybaraGame() {
   const [pipes, setPipes] = useState<Pipe[]>([]);
   const pipeGenerationTimer = useRef<NodeJS.Timeout | null>(null);
 
+  // Clouds
+  const [clouds, setClouds] = useState<Cloud[]>([]);
+  const cloudUpdateTimer = useRef<NodeJS.Timeout | null>(null);
+
   // Game loop
   const gameLoopRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -75,7 +87,41 @@ export default function FlappybaraGame() {
     overlay: isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.9)',
     button: isDark ? '#3498db' : '#2980b9',
     buttonText: '#ffffff',
+    cloud: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)',
   };
+
+  // Initialize clouds on mount
+  useEffect(() => {
+    const initialClouds: Cloud[] = [];
+    for (let i = 0; i < 5; i++) {
+      initialClouds.push({
+        x: Math.random() * SCREEN_WIDTH,
+        y: Math.random() * (SCREEN_HEIGHT - GROUND_HEIGHT - 200) + 50,
+        size: Math.random() * 60 + 40,
+        speed: Math.random() * 0.3 + 0.2,
+      });
+    }
+    setClouds(initialClouds);
+
+    // Start cloud animation
+    cloudUpdateTimer.current = setInterval(() => {
+      setClouds((prevClouds) =>
+        prevClouds.map((cloud) => {
+          let newX = cloud.x - cloud.speed;
+          if (newX < -cloud.size - 50) {
+            newX = SCREEN_WIDTH + 50;
+          }
+          return { ...cloud, x: newX };
+        })
+      );
+    }, 1000 / 30); // 30 FPS for clouds
+
+    return () => {
+      if (cloudUpdateTimer.current) {
+        clearInterval(cloudUpdateTimer.current);
+      }
+    };
+  }, []);
 
   // Animated styles
   const birdStyle = useAnimatedStyle(() => {
@@ -134,14 +180,26 @@ export default function FlappybaraGame() {
       const targetRotation = Math.min(Math.max(birdVelocity.current * 3, -30), 90);
       birdRotation.value = withTiming(targetRotation, { duration: 100 });
 
-      // Check ground collision
-      if (birdY.value > SCREEN_HEIGHT - GROUND_HEIGHT - BIRD_SIZE) {
+      // PRECISE COLLISION DETECTION - Only die on actual collision, not proximity
+      // Add small collision margin (5px) to make it more forgiving
+      const collisionMargin = 5;
+      const birdLeft = SCREEN_WIDTH / 2 - BIRD_SIZE / 2 + collisionMargin;
+      const birdRight = SCREEN_WIDTH / 2 + BIRD_SIZE / 2 - collisionMargin;
+      const birdTop = birdY.value + collisionMargin;
+      const birdBottom = birdY.value + BIRD_SIZE - collisionMargin;
+
+      // Check ground collision - bird must actually touch the ground
+      if (birdBottom >= SCREEN_HEIGHT - GROUND_HEIGHT) {
+        console.log('Collision detected: Bird hit ground');
         endGame();
+        return;
       }
 
-      // Check ceiling collision
-      if (birdY.value < 0) {
+      // Check ceiling collision - bird must actually touch the ceiling
+      if (birdTop <= 0) {
+        console.log('Collision detected: Bird hit ceiling');
         endGame();
+        return;
       }
 
       // Update pipes
@@ -156,18 +214,21 @@ export default function FlappybaraGame() {
               return { ...pipe, x: newX, passed: true };
             }
 
-            // Check collision with pipe
-            const birdLeft = SCREEN_WIDTH / 2 - BIRD_SIZE / 2;
-            const birdRight = SCREEN_WIDTH / 2 + BIRD_SIZE / 2;
-            const birdTop = birdY.value;
-            const birdBottom = birdY.value + BIRD_SIZE;
-
+            // PRECISE COLLISION DETECTION - Only trigger when bird actually overlaps with pipe
             const pipeLeft = newX;
             const pipeRight = newX + PIPE_WIDTH;
 
-            if (birdRight > pipeLeft && birdLeft < pipeRight) {
-              // Bird is horizontally aligned with pipe
-              if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + PIPE_GAP) {
+            // Check if bird is horizontally overlapping with pipe
+            const horizontalOverlap = birdRight > pipeLeft && birdLeft < pipeRight;
+
+            if (horizontalOverlap) {
+              // Bird is horizontally aligned with pipe - check vertical collision
+              // Bird must actually touch the pipe, not just be near it
+              const hitTopPipe = birdTop < pipe.topHeight;
+              const hitBottomPipe = birdBottom > pipe.topHeight + PIPE_GAP;
+
+              if (hitTopPipe || hitBottomPipe) {
+                console.log('Collision detected: Bird hit pipe at x:', newX);
                 endGame();
               }
             }
@@ -230,6 +291,48 @@ export default function FlappybaraGame() {
   return (
     <GestureDetector gesture={tapGesture}>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
+        {/* Clouds in background */}
+        {clouds.map((cloud, index) => (
+          <View
+            key={index}
+            style={[
+              styles.cloud,
+              {
+                left: cloud.x,
+                top: cloud.y,
+                width: cloud.size,
+                height: cloud.size * 0.6,
+                backgroundColor: colors.cloud,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.cloudPart,
+                {
+                  left: cloud.size * 0.2,
+                  top: cloud.size * 0.1,
+                  width: cloud.size * 0.4,
+                  height: cloud.size * 0.4,
+                  backgroundColor: colors.cloud,
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.cloudPart,
+                {
+                  right: cloud.size * 0.2,
+                  top: cloud.size * 0.05,
+                  width: cloud.size * 0.35,
+                  height: cloud.size * 0.35,
+                  backgroundColor: colors.cloud,
+                },
+              ]}
+            />
+          </View>
+        ))}
+
         {/* Score */}
         <View style={styles.scoreContainer}>
           <Text style={[styles.scoreText, { color: colors.text }]}>{score}</Text>
@@ -353,6 +456,15 @@ const styles = StyleSheet.create({
   capybaraImage: {
     width: '100%',
     height: '100%',
+  },
+  cloud: {
+    position: 'absolute',
+    borderRadius: 100,
+    zIndex: 1,
+  },
+  cloudPart: {
+    position: 'absolute',
+    borderRadius: 100,
   },
   pipe: {
     position: 'absolute',
