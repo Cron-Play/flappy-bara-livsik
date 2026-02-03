@@ -22,6 +22,7 @@ import Animated, {
   withRepeat,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -40,6 +41,8 @@ const CLOUD_MIN_SIZE = 80; // Increased minimum size
 const CLOUD_MAX_SIZE = 150; // Increased maximum size
 const CLOUD_MIN_SPEED = 0.3; // Slightly faster minimum
 const CLOUD_MAX_SPEED = 0.8; // Slightly faster maximum
+
+const HIGH_SCORE_KEY = '@flappybara_high_score';
 
 interface Pipe {
   x: number;
@@ -96,6 +99,33 @@ export default function FlappybaraGame() {
     button: isDark ? '#3498db' : '#2980b9',
     buttonText: '#ffffff',
     cloud: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.9)',
+  };
+
+  // Load high score from storage on mount
+  useEffect(() => {
+    loadHighScore();
+  }, []);
+
+  const loadHighScore = async () => {
+    try {
+      const savedHighScore = await AsyncStorage.getItem(HIGH_SCORE_KEY);
+      if (savedHighScore !== null) {
+        const parsedScore = parseInt(savedHighScore, 10);
+        setHighScore(parsedScore);
+        console.log('Loaded high score from storage:', parsedScore);
+      }
+    } catch (error) {
+      console.error('Error loading high score:', error);
+    }
+  };
+
+  const saveHighScore = async (newHighScore: number) => {
+    try {
+      await AsyncStorage.setItem(HIGH_SCORE_KEY, newHighScore.toString());
+      console.log('Saved new high score to storage:', newHighScore);
+    } catch (error) {
+      console.error('Error saving high score:', error);
+    }
   };
 
   // Initialize clouds on mount - Enhanced distribution
@@ -264,6 +294,7 @@ export default function FlappybaraGame() {
     
     if (score > highScore) {
       setHighScore(score);
+      saveHighScore(score);
       console.log('New high score:', score);
     }
   };
