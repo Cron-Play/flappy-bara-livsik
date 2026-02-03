@@ -24,15 +24,28 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import mobileAds, {
-  BannerAd,
-  BannerAdSize,
-  TestIds,
-  InterstitialAd,
-  AdEventType,
-  RewardedAd,
-  RewardedAdEventType,
-} from 'react-native-google-mobile-ads';
+
+// Conditionally import AdMob only on native platforms
+let mobileAds: any = null;
+let BannerAd: any = null;
+let BannerAdSize: any = null;
+let TestIds: any = null;
+let InterstitialAd: any = null;
+let AdEventType: any = null;
+let RewardedAd: any = null;
+let RewardedAdEventType: any = null;
+
+if (Platform.OS !== 'web') {
+  const adMobModule = require('react-native-google-mobile-ads');
+  mobileAds = adMobModule.default;
+  BannerAd = adMobModule.BannerAd;
+  BannerAdSize = adMobModule.BannerAdSize;
+  TestIds = adMobModule.TestIds;
+  InterstitialAd = adMobModule.InterstitialAd;
+  AdEventType = adMobModule.AdEventType;
+  RewardedAd = adMobModule.RewardedAd;
+  RewardedAdEventType = adMobModule.RewardedAdEventType;
+}
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -55,10 +68,10 @@ const CLOUD_MAX_SPEED = 0.8; // Slightly faster maximum
 const HIGH_SCORE_KEY = '@flappybara_high_score';
 const RUN_COUNT_KEY = '@flappybara_run_count';
 
-// AdMob Ad Unit IDs (using test IDs for development)
-const BANNER_AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
-const INTERSTITIAL_AD_UNIT_ID = __DEV__ ? TestIds.INTERSTITIAL : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
-const REWARDED_AD_UNIT_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
+// AdMob Ad Unit IDs (using test IDs for development) - only used on native
+const BANNER_AD_UNIT_ID = Platform.OS !== 'web' && __DEV__ && TestIds ? TestIds.BANNER : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
+const INTERSTITIAL_AD_UNIT_ID = Platform.OS !== 'web' && __DEV__ && TestIds ? TestIds.INTERSTITIAL : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
+const REWARDED_AD_UNIT_ID = Platform.OS !== 'web' && __DEV__ && TestIds ? TestIds.REWARDED : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
 
 interface Pipe {
   x: number;
@@ -73,15 +86,19 @@ interface Cloud {
   speed: number;
 }
 
-// Create interstitial ad instance
-const interstitialAd = InterstitialAd.createForAdRequest(INTERSTITIAL_AD_UNIT_ID, {
-  requestNonPersonalizedAdsOnly: true,
-});
+// Create interstitial ad instance (only on native)
+let interstitialAd: any = null;
+let rewardedAd: any = null;
 
-// Create rewarded ad instance
-const rewardedAd = RewardedAd.createForAdRequest(REWARDED_AD_UNIT_ID, {
-  requestNonPersonalizedAdsOnly: true,
-});
+if (Platform.OS !== 'web' && InterstitialAd && RewardedAd) {
+  interstitialAd = InterstitialAd.createForAdRequest(INTERSTITIAL_AD_UNIT_ID, {
+    requestNonPersonalizedAdsOnly: true,
+  });
+
+  rewardedAd = RewardedAd.createForAdRequest(REWARDED_AD_UNIT_ID, {
+    requestNonPersonalizedAdsOnly: true,
+  });
+}
 
 export default function FlappybaraGame() {
   console.log('User opened Flappybara game');
@@ -135,12 +152,19 @@ export default function FlappybaraGame() {
 
   // Initialize AdMob and load data on mount
   useEffect(() => {
-    initializeAds();
+    if (Platform.OS !== 'web') {
+      initializeAds();
+    }
     loadHighScore();
     loadRunCount();
   }, []);
 
   const initializeAds = async () => {
+    if (Platform.OS === 'web' || !mobileAds) {
+      console.log('AdMob not available on web platform');
+      return;
+    }
+
     try {
       await mobileAds().initialize();
       console.log('AdMob initialized successfully');
@@ -202,6 +226,10 @@ export default function FlappybaraGame() {
 
   // Load interstitial ad
   const loadInterstitialAd = () => {
+    if (Platform.OS === 'web' || !interstitialAd || !AdEventType) {
+      return;
+    }
+
     const unsubscribeLoaded = interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
       console.log('Interstitial ad loaded');
       setInterstitialLoaded(true);
@@ -214,7 +242,7 @@ export default function FlappybaraGame() {
       interstitialAd.load();
     });
 
-    const unsubscribeError = interstitialAd.addAdEventListener(AdEventType.ERROR, (error) => {
+    const unsubscribeError = interstitialAd.addAdEventListener(AdEventType.ERROR, (error: any) => {
       console.error('Interstitial ad error:', error);
       setInterstitialLoaded(false);
     });
@@ -231,6 +259,10 @@ export default function FlappybaraGame() {
 
   // Load rewarded ad
   const loadRewardedAd = () => {
+    if (Platform.OS === 'web' || !rewardedAd || !RewardedAdEventType || !AdEventType) {
+      return;
+    }
+
     const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
       console.log('Rewarded ad loaded');
       setRewardedLoaded(true);
@@ -238,7 +270,7 @@ export default function FlappybaraGame() {
 
     const unsubscribeEarned = rewardedAd.addAdEventListener(
       RewardedAdEventType.EARNED_REWARD,
-      (reward) => {
+      (reward: any) => {
         console.log('User earned reward:', reward);
         // Continue the game
         continueGame();
@@ -253,7 +285,7 @@ export default function FlappybaraGame() {
       rewardedAd.load();
     });
 
-    const unsubscribeError = rewardedAd.addAdEventListener(AdEventType.ERROR, (error) => {
+    const unsubscribeError = rewardedAd.addAdEventListener(AdEventType.ERROR, (error: any) => {
       console.error('Rewarded ad error:', error);
       setRewardedLoaded(false);
       setShowRewardedAdModal(false);
@@ -322,8 +354,8 @@ export default function FlappybaraGame() {
     setRunCount(newRunCount);
     saveRunCount(newRunCount);
     
-    // Show interstitial ad every 3rd run
-    if (newRunCount % 3 === 0 && interstitialLoaded) {
+    // Show interstitial ad every 3rd run (only on native)
+    if (Platform.OS !== 'web' && newRunCount % 3 === 0 && interstitialLoaded && interstitialAd) {
       console.log('Showing interstitial ad (run #' + newRunCount + ')');
       interstitialAd.show();
     }
@@ -445,8 +477,8 @@ export default function FlappybaraGame() {
       clearInterval(pipeGenerationTimer.current);
     }
     
-    // Check if this is the first crash and user hasn't used continue yet
-    if (!hasUsedContinue && rewardedLoaded) {
+    // Check if this is the first crash and user hasn't used continue yet (only on native)
+    if (Platform.OS !== 'web' && !hasUsedContinue && rewardedLoaded) {
       console.log('First crash - offering rewarded ad to continue');
       setShowRewardedAdModal(true);
       return;
@@ -497,7 +529,7 @@ export default function FlappybaraGame() {
   // Watch rewarded ad
   const watchRewardedAd = () => {
     console.log('User chose to watch rewarded ad');
-    if (rewardedLoaded) {
+    if (Platform.OS !== 'web' && rewardedLoaded && rewardedAd) {
       rewardedAd.show();
     } else {
       console.error('Rewarded ad not loaded yet');
@@ -549,8 +581,8 @@ export default function FlappybaraGame() {
         style={[styles.container, { backgroundColor: colors.background }]}
         onPress={handleScreenTap}
       >
-        {/* AdMob Banner at top */}
-        {adsInitialized && (
+        {/* AdMob Banner at top - only on native platforms */}
+        {Platform.OS !== 'web' && adsInitialized && BannerAd && BannerAdSize && (
           <View style={styles.bannerContainer}>
             <BannerAd
               unitId={BANNER_AD_UNIT_ID}
@@ -605,8 +637,8 @@ export default function FlappybaraGame() {
           </React.Fragment>
         ))}
 
-        {/* Score - positioned below banner */}
-        <View style={[styles.scoreContainer, adsInitialized && styles.scoreContainerWithBanner]}>
+        {/* Score - positioned below banner if ads are shown */}
+        <View style={[styles.scoreContainer, Platform.OS !== 'web' && adsInitialized && styles.scoreContainerWithBanner]}>
           <Text style={[styles.scoreText, { color: colors.text }]}>{score}</Text>
         </View>
 
@@ -697,43 +729,45 @@ export default function FlappybaraGame() {
           </View>
         )}
 
-        {/* Rewarded Ad Modal - Watch to Continue */}
-        <Modal
-          visible={showRewardedAdModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={declineRewardedAd}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, { backgroundColor: colors.overlay }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Game Over!</Text>
-              <Text style={[styles.modalScore, { color: colors.text }]}>Score: {score}</Text>
-              <Text style={[styles.modalMessage, { color: colors.text }]}>
-                Watch an ad to continue playing?
-              </Text>
-              
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.watchAdButton, { backgroundColor: colors.button }]}
-                  onPress={watchRewardedAd}
-                >
-                  <Text style={[styles.modalButtonText, { color: colors.buttonText }]}>
-                    Watch Ad
-                  </Text>
-                </TouchableOpacity>
+        {/* Rewarded Ad Modal - Watch to Continue (only on native) */}
+        {Platform.OS !== 'web' && (
+          <Modal
+            visible={showRewardedAdModal}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={declineRewardedAd}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalContent, { backgroundColor: colors.overlay }]}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Game Over!</Text>
+                <Text style={[styles.modalScore, { color: colors.text }]}>Score: {score}</Text>
+                <Text style={[styles.modalMessage, { color: colors.text }]}>
+                  Watch an ad to continue playing?
+                </Text>
                 
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.declineButton, { backgroundColor: '#e74c3c' }]}
-                  onPress={declineRewardedAd}
-                >
-                  <Text style={[styles.modalButtonText, { color: colors.buttonText }]}>
-                    No Thanks
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.watchAdButton, { backgroundColor: colors.button }]}
+                    onPress={watchRewardedAd}
+                  >
+                    <Text style={[styles.modalButtonText, { color: colors.buttonText }]}>
+                      Watch Ad
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.declineButton, { backgroundColor: '#e74c3c' }]}
+                    onPress={declineRewardedAd}
+                  >
+                    <Text style={[styles.modalButtonText, { color: colors.buttonText }]}>
+                      No Thanks
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
-          </View>
-        </Modal>
+          </Modal>
+        )}
       </Pressable>
     </GestureDetector>
   );
