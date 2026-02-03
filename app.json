@@ -18,6 +18,9 @@
       "bundleIdentifier": "com.anonymous.Flappybara",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "config": {
+        "googleMobileAdsAppId": "ca-app-pub-3940256099942544~1458002511"
       }
     },
     "android": {
@@ -26,7 +29,10 @@
         "backgroundColor": "#87CEEB"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.cronplay.flappybara"
+      "package": "com.cronplay.flappybara",
+      "config": {
+        "googleMobileAdsAppId": "ca-app-pub-3940256099942544~3347511713"
+      }
     },
     "web": {
       "favicon": "./assets/images/final_quest_240x240.png",
@@ -35,7 +41,8 @@
     "plugins": [
       "expo-font",
       "expo-router",
-      "expo-web-browser"
+      "expo-web-browser",
+      "react-native-google-mobile-ads"
     ],
     "scheme": "FlappyBara",
     "experiments": {
