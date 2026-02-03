@@ -10,68 +10,39 @@ import {
   Platform,
   Image,
   Pressable,
-  Modal,
 } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   withSequence,
+  Easing,
+  cancelAnimation,
+  runOnJS,
+  withRepeat,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Conditionally import AdMob only on native platforms
-let mobileAds: any = null;
-let BannerAd: any = null;
-let BannerAdSize: any = null;
-let TestIds: any = null;
-let InterstitialAd: any = null;
-let AdEventType: any = null;
-let RewardedAd: any = null;
-let RewardedAdEventType: any = null;
-
-if (Platform.OS !== 'web') {
-  try {
-    const adMobModule = require('react-native-google-mobile-ads');
-    mobileAds = adMobModule.default;
-    BannerAd = adMobModule.BannerAd;
-    BannerAdSize = adMobModule.BannerAdSize;
-    TestIds = adMobModule.TestIds;
-    InterstitialAd = adMobModule.InterstitialAd;
-    AdEventType = adMobModule.AdEventType;
-    RewardedAd = adMobModule.RewardedAd;
-    RewardedAdEventType = adMobModule.RewardedAdEventType;
-  } catch (error) {
-    console.log('AdMob not available:', error);
-  }
-}
-
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Game constants - ADJUSTED FOR SMOOTHER, LESS VIOLENT GAMEPLAY
-const BIRD_SIZE = 70;
-const GRAVITY = 0.4;
-const JUMP_VELOCITY = -8;
+const BIRD_SIZE = 70; // Increased from 60 to make capybara slightly bigger
+const GRAVITY = 0.4; // Decreased from 0.5 for slower fall (less gravity)
+const JUMP_VELOCITY = -8; // REDUCED from -11 to -8 for less violent jumping
 const PIPE_WIDTH = 60;
 const PIPE_GAP = 180;
-const PIPE_SPEED = 1.5;
+const PIPE_SPEED = 1.5; // Decreased from 2 for slower game speed
 const GROUND_HEIGHT = 100;
 
-// Cloud configuration
-const NUM_CLOUDS = 8;
-const CLOUD_MIN_SIZE = 80;
-const CLOUD_MAX_SIZE = 150;
-const CLOUD_MIN_SPEED = 0.3;
-const CLOUD_MAX_SPEED = 0.8;
+// Cloud configuration - Enhanced for better visibility
+const NUM_CLOUDS = 8; // Increased from 5 for more clouds
+const CLOUD_MIN_SIZE = 80; // Increased minimum size
+const CLOUD_MAX_SIZE = 150; // Increased maximum size
+const CLOUD_MIN_SPEED = 0.3; // Slightly faster minimum
+const CLOUD_MAX_SPEED = 0.8; // Slightly faster maximum
 
 const HIGH_SCORE_KEY = '@flappybara_high_score';
-const RUN_COUNT_KEY = '@flappybara_run_count';
-
-// AdMob Ad Unit IDs (using test IDs for development)
-const BANNER_AD_UNIT_ID = Platform.OS !== 'web' && __DEV__ && TestIds ? TestIds.BANNER : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
-const INTERSTITIAL_AD_UNIT_ID = Platform.OS !== 'web' && __DEV__ && TestIds ? TestIds.INTERSTITIAL : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
-const REWARDED_AD_UNIT_ID = Platform.OS !== 'web' && __DEV__ && TestIds ? TestIds.REWARDED : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
 
 interface Pipe {
   x: number;
@@ -86,24 +57,6 @@ interface Cloud {
   speed: number;
 }
 
-// Create interstitial ad instance (only on native)
-let interstitialAd: any = null;
-let rewardedAd: any = null;
-
-if (Platform.OS !== 'web' && InterstitialAd && RewardedAd) {
-  try {
-    interstitialAd = InterstitialAd.createForAdRequest(INTERSTITIAL_AD_UNIT_ID, {
-      requestNonPersonalizedAdsOnly: true,
-    });
-
-    rewardedAd = RewardedAd.createForAdRequest(REWARDED_AD_UNIT_ID, {
-      requestNonPersonalizedAdsOnly: true,
-    });
-  } catch (error) {
-    console.log('Error creating ad instances:', error);
-  }
-}
-
 export default function FlappybaraGame() {
   console.log('User opened Flappybara game');
   
@@ -115,12 +68,6 @@ export default function FlappybaraGame() {
   const [gameOver, setGameOver] = useState(false);
   const [score, setScore] = useState(0);
   const [highScore, setHighScore] = useState(0);
-  const [runCount, setRunCount] = useState(0);
-  const [showRewardedAdModal, setShowRewardedAdModal] = useState(false);
-  const [hasUsedContinue, setHasUsedContinue] = useState(false);
-  const [interstitialLoaded, setInterstitialLoaded] = useState(false);
-  const [rewardedLoaded, setRewardedLoaded] = useState(false);
-  const [adsInitialized, setAdsInitialized] = useState(false);
 
   // Bird physics
   const birdY = useSharedValue(SCREEN_HEIGHT / 2 - 100);
@@ -139,48 +86,25 @@ export default function FlappybaraGame() {
   const gameLoopRef = useRef<NodeJS.Timeout | null>(null);
 
   // Colors based on theme
-  const skyColor = isDark ? '#1a1a2e' : '#87CEEB';
-  const birdColor = '#FFD700';
-  const birdAccentColor = '#FFA500';
-  const pipeColor = isDark ? '#2ecc71' : '#228B22';
-  const pipeAccentColor = isDark ? '#27ae60' : '#1a6b14';
-  const groundColor = isDark ? '#34495e' : '#8B4513';
-  const groundAccentColor = isDark ? '#2c3e50' : '#654321';
-  const textColor = isDark ? '#ecf0f1' : '#2c3e50';
-  const overlayColor = isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.9)';
-  const buttonColor = isDark ? '#3498db' : '#2980b9';
-  const buttonTextColor = '#ffffff';
-  const cloudColor = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.9)';
-
-  // Initialize AdMob and load data on mount
-  useEffect(() => {
-    if (Platform.OS !== 'web' && mobileAds) {
-      initializeAds();
-    }
-    loadHighScore();
-    loadRunCount();
-  }, []);
-
-  const initializeAds = async () => {
-    if (Platform.OS === 'web' || !mobileAds) {
-      console.log('AdMob not available on web platform');
-      return;
-    }
-
-    try {
-      await mobileAds().initialize();
-      console.log('AdMob initialized successfully');
-      setAdsInitialized(true);
-      
-      // Load interstitial ad
-      loadInterstitialAd();
-      
-      // Load rewarded ad
-      loadRewardedAd();
-    } catch (error) {
-      console.error('Error initializing AdMob:', error);
-    }
+  const colors = {
+    background: isDark ? '#1a1a2e' : '#87CEEB',
+    bird: '#FFD700',
+    birdAccent: '#FFA500',
+    pipe: isDark ? '#2ecc71' : '#228B22',
+    pipeAccent: isDark ? '#27ae60' : '#1a6b14',
+    ground: isDark ? '#34495e' : '#8B4513',
+    groundAccent: isDark ? '#2c3e50' : '#654321',
+    text: isDark ? '#ecf0f1' : '#2c3e50',
+    overlay: isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.9)',
+    button: isDark ? '#3498db' : '#2980b9',
+    buttonText: '#ffffff',
+    cloud: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.9)',
   };
+
+  // Load high score from storage on mount
+  useEffect(() => {
+    loadHighScore();
+  }, []);
 
   const loadHighScore = async () => {
     try {
@@ -204,110 +128,7 @@ export default function FlappybaraGame() {
     }
   };
 
-  const loadRunCount = async () => {
-    try {
-      const savedRunCount = await AsyncStorage.getItem(RUN_COUNT_KEY);
-      if (savedRunCount !== null) {
-        const parsedCount = parseInt(savedRunCount, 10);
-        setRunCount(parsedCount);
-        console.log('Loaded run count from storage:', parsedCount);
-      }
-    } catch (error) {
-      console.error('Error loading run count:', error);
-    }
-  };
-
-  const saveRunCount = async (newRunCount: number) => {
-    try {
-      await AsyncStorage.setItem(RUN_COUNT_KEY, newRunCount.toString());
-      console.log('Saved run count to storage:', newRunCount);
-    } catch (error) {
-      console.error('Error saving run count:', error);
-    }
-  };
-
-  // Load interstitial ad
-  const loadInterstitialAd = () => {
-    if (Platform.OS === 'web' || !interstitialAd || !AdEventType) {
-      return;
-    }
-
-    try {
-      const unsubscribeLoaded = interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
-        console.log('Interstitial ad loaded');
-        setInterstitialLoaded(true);
-      });
-
-      const unsubscribeClosed = interstitialAd.addAdEventListener(AdEventType.CLOSED, () => {
-        console.log('Interstitial ad closed');
-        setInterstitialLoaded(false);
-        interstitialAd.load();
-      });
-
-      const unsubscribeError = interstitialAd.addAdEventListener(AdEventType.ERROR, (error: any) => {
-        console.error('Interstitial ad error:', error);
-        setInterstitialLoaded(false);
-      });
-
-      interstitialAd.load();
-
-      return () => {
-        unsubscribeLoaded();
-        unsubscribeClosed();
-        unsubscribeError();
-      };
-    } catch (error) {
-      console.error('Error loading interstitial ad:', error);
-    }
-  };
-
-  // Load rewarded ad
-  const loadRewardedAd = () => {
-    if (Platform.OS === 'web' || !rewardedAd || !RewardedAdEventType || !AdEventType) {
-      return;
-    }
-
-    try {
-      const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
-        console.log('Rewarded ad loaded');
-        setRewardedLoaded(true);
-      });
-
-      const unsubscribeEarned = rewardedAd.addAdEventListener(
-        RewardedAdEventType.EARNED_REWARD,
-        (reward: any) => {
-          console.log('User earned reward:', reward);
-          continueGame();
-        }
-      );
-
-      const unsubscribeClosed = rewardedAd.addAdEventListener(AdEventType.CLOSED, () => {
-        console.log('Rewarded ad closed');
-        setShowRewardedAdModal(false);
-        setRewardedLoaded(false);
-        rewardedAd.load();
-      });
-
-      const unsubscribeError = rewardedAd.addAdEventListener(AdEventType.ERROR, (error: any) => {
-        console.error('Rewarded ad error:', error);
-        setRewardedLoaded(false);
-        setShowRewardedAdModal(false);
-      });
-
-      rewardedAd.load();
-
-      return () => {
-        unsubscribeLoaded();
-        unsubscribeEarned();
-        unsubscribeClosed();
-        unsubscribeError();
-      };
-    } catch (error) {
-      console.error('Error loading rewarded ad:', error);
-    }
-  };
-
-  // Initialize clouds on mount
+  // Initialize clouds on mount - Enhanced distribution
   useEffect(() => {
     const initialClouds: Cloud[] = [];
     for (let i = 0; i < NUM_CLOUDS; i++) {
@@ -331,7 +152,7 @@ export default function FlappybaraGame() {
           return { ...cloud, x: newX };
         })
       );
-    }, 1000 / 30);
+    }, 1000 / 30); // 30 FPS for clouds
 
     return () => {
       if (cloudUpdateTimer.current) {
@@ -353,25 +174,9 @@ export default function FlappybaraGame() {
   // Start game
   const startGame = () => {
     console.log('User started new game');
-    
-    const newRunCount = runCount + 1;
-    setRunCount(newRunCount);
-    saveRunCount(newRunCount);
-    
-    // Show interstitial ad every 3rd run (only on native)
-    if (Platform.OS !== 'web' && newRunCount % 3 === 0 && interstitialLoaded && interstitialAd) {
-      console.log('Showing interstitial ad (run #' + newRunCount + ')');
-      try {
-        interstitialAd.show();
-      } catch (error) {
-        console.error('Error showing interstitial ad:', error);
-      }
-    }
-    
     setGameStarted(true);
     setGameOver(false);
     setScore(0);
-    setHasUsedContinue(false);
     birdY.value = SCREEN_HEIGHT / 2 - 100;
     birdVelocity.current = 0;
     birdRotation.value = 0;
@@ -409,25 +214,26 @@ export default function FlappybaraGame() {
       birdVelocity.current += GRAVITY;
       birdY.value += birdVelocity.current;
 
-      // Update bird rotation based on velocity
+      // Update bird rotation based on velocity - smoother rotation
       const targetRotation = Math.min(Math.max(birdVelocity.current * 2.5, -25), 70);
       birdRotation.value = withTiming(targetRotation, { duration: 150 });
 
-      // Collision detection with margin
+      // PRECISE COLLISION DETECTION - Only die on actual collision, not proximity
+      // Add small collision margin (5px) to make it more forgiving
       const collisionMargin = 5;
       const birdLeft = SCREEN_WIDTH / 2 - BIRD_SIZE / 2 + collisionMargin;
       const birdRight = SCREEN_WIDTH / 2 + BIRD_SIZE / 2 - collisionMargin;
       const birdTop = birdY.value + collisionMargin;
       const birdBottom = birdY.value + BIRD_SIZE - collisionMargin;
 
-      // Check ground collision
+      // Check ground collision - bird must actually touch the ground
       if (birdBottom >= SCREEN_HEIGHT - GROUND_HEIGHT) {
         console.log('Collision detected: Bird hit ground');
         endGame();
         return;
       }
 
-      // Check ceiling collision
+      // Check ceiling collision - bird must actually touch the ceiling
       if (birdTop <= 0) {
         console.log('Collision detected: Bird hit ceiling');
         endGame();
@@ -446,13 +252,16 @@ export default function FlappybaraGame() {
               return { ...pipe, x: newX, passed: true };
             }
 
-            // Collision detection
+            // PRECISE COLLISION DETECTION - Only trigger when bird actually overlaps with pipe
             const pipeLeft = newX;
             const pipeRight = newX + PIPE_WIDTH;
 
+            // Check if bird is horizontally overlapping with pipe
             const horizontalOverlap = birdRight > pipeLeft && birdLeft < pipeRight;
 
             if (horizontalOverlap) {
+              // Bird is horizontally aligned with pipe - check vertical collision
+              // Bird must actually touch the pipe, not just be near it
               const hitTopPipe = birdTop < pipe.topHeight;
               const hitBottomPipe = birdBottom > pipe.topHeight + PIPE_GAP;
 
@@ -468,7 +277,7 @@ export default function FlappybaraGame() {
 
         return updatedPipes;
       });
-    }, 1000 / 60);
+    }, 1000 / 60); // 60 FPS
   };
 
   // End game
@@ -480,14 +289,6 @@ export default function FlappybaraGame() {
     if (pipeGenerationTimer.current) {
       clearInterval(pipeGenerationTimer.current);
     }
-    
-    // Check if this is the first crash and user hasn't used continue yet (only on native)
-    if (Platform.OS !== 'web' && !hasUsedContinue && rewardedLoaded) {
-      console.log('First crash - offering rewarded ad to continue');
-      setShowRewardedAdModal(true);
-      return;
-    }
-    
     setGameOver(true);
     setGameStarted(false);
     
@@ -498,69 +299,21 @@ export default function FlappybaraGame() {
     }
   };
 
-  // Continue game after watching rewarded ad
-  const continueGame = () => {
-    console.log('User continuing game after watching ad');
-    setHasUsedContinue(true);
-    setShowRewardedAdModal(false);
-    
-    // Reset bird position and velocity
-    birdY.value = SCREEN_HEIGHT / 2 - 100;
-    birdVelocity.current = 0;
-    birdRotation.value = 0;
-    
-    // Clear pipes and restart
-    setPipes([]);
-    
-    // Restart game loop
-    startGameLoop();
-  };
-
-  // Handle declining the rewarded ad
-  const declineRewardedAd = () => {
-    console.log('User declined to watch ad');
-    setShowRewardedAdModal(false);
-    setGameOver(true);
-    setGameStarted(false);
-    
-    if (score > highScore) {
-      setHighScore(score);
-      saveHighScore(score);
-      console.log('New high score:', score);
-    }
-  };
-
-  // Watch rewarded ad
-  const watchRewardedAd = () => {
-    console.log('User chose to watch rewarded ad');
-    if (Platform.OS !== 'web' && rewardedLoaded && rewardedAd) {
-      try {
-        rewardedAd.show();
-      } catch (error) {
-        console.error('Error showing rewarded ad:', error);
-        setShowRewardedAdModal(false);
-        declineRewardedAd();
-      }
-    } else {
-      console.error('Rewarded ad not loaded yet');
-      setShowRewardedAdModal(false);
-      declineRewardedAd();
-    }
-  };
-
-  // Jump
+  // Jump - smoother, less violent
   const jump = () => {
     if (!gameStarted || gameOver) return;
     console.log('User tapped to jump');
     birdVelocity.current = JUMP_VELOCITY;
+    // Smoother rotation animation
     birdRotation.value = withSequence(
       withTiming(-25, { duration: 150 }),
       withTiming(0, { duration: 250 })
     );
   };
 
-  // Handle screen tap
+  // Handle screen tap - works anywhere on screen during gameplay
   const handleScreenTap = () => {
+    console.log('User tapped screen');
     if (gameStarted && !gameOver) {
       jump();
     }
@@ -568,9 +321,7 @@ export default function FlappybaraGame() {
 
   // Tap gesture for the entire screen
   const tapGesture = Gesture.Tap().onStart(() => {
-    if (gameStarted && !gameOver) {
-      jump();
-    }
+    runOnJS(handleScreenTap)();
   });
 
   // Cleanup on unmount
@@ -588,25 +339,12 @@ export default function FlappybaraGame() {
   return (
     <GestureDetector gesture={tapGesture}>
       <Pressable 
-        style={[styles.container, { backgroundColor: skyColor }]}
+        style={[styles.container, { backgroundColor: colors.background }]}
         onPress={handleScreenTap}
       >
-        {/* AdMob Banner at top - only on native platforms */}
-        {Platform.OS !== 'web' && adsInitialized && BannerAd && BannerAdSize && (
-          <View style={styles.bannerContainer}>
-            <BannerAd
-              unitId={BANNER_AD_UNIT_ID}
-              size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-              requestOptions={{
-                requestNonPersonalizedAdsOnly: true,
-              }}
-            />
-          </View>
-        )}
-
-        {/* Clouds in background */}
+        {/* Clouds in background - Enhanced visibility */}
         {clouds.map((cloud, index) => (
-          <View key={index}>
+          <React.Fragment key={index}>
             <View
               style={[
                 styles.cloud,
@@ -615,7 +353,7 @@ export default function FlappybaraGame() {
                   top: cloud.y,
                   width: cloud.size,
                   height: cloud.size * 0.6,
-                  backgroundColor: cloudColor,
+                  backgroundColor: colors.cloud,
                 },
               ]}
             >
@@ -627,7 +365,7 @@ export default function FlappybaraGame() {
                     top: cloud.size * 0.1,
                     width: cloud.size * 0.4,
                     height: cloud.size * 0.4,
-                    backgroundColor: cloudColor,
+                    backgroundColor: colors.cloud,
                   },
                 ]}
               />
@@ -639,17 +377,17 @@ export default function FlappybaraGame() {
                     top: cloud.size * 0.05,
                     width: cloud.size * 0.35,
                     height: cloud.size * 0.35,
-                    backgroundColor: cloudColor,
+                    backgroundColor: colors.cloud,
                   },
                 ]}
               />
             </View>
-          </View>
+          </React.Fragment>
         ))}
 
         {/* Score */}
-        <View style={[styles.scoreContainer, Platform.OS !== 'web' && adsInitialized && styles.scoreContainerWithBanner]}>
-          <Text style={[styles.scoreText, { color: textColor }]}>{score}</Text>
+        <View style={styles.scoreContainer}>
+          <Text style={[styles.scoreText, { color: colors.text }]}>{score}</Text>
         </View>
 
         {/* Capybara */}
@@ -663,7 +401,7 @@ export default function FlappybaraGame() {
 
         {/* Pipes */}
         {pipes.map((pipe, index) => (
-          <View key={index}>
+          <React.Fragment key={index}>
             {/* Top pipe */}
             <View
               style={[
@@ -672,12 +410,12 @@ export default function FlappybaraGame() {
                   left: pipe.x,
                   top: 0,
                   height: pipe.topHeight,
-                  backgroundColor: pipeColor,
-                  borderRightColor: pipeAccentColor,
+                  backgroundColor: colors.pipe,
+                  borderRightColor: colors.pipeAccent,
                 },
               ]}
             >
-              <View style={[styles.pipeTop, { backgroundColor: pipeColor, borderColor: pipeAccentColor }]} />
+              <View style={[styles.pipeTop, { backgroundColor: colors.pipe, borderColor: colors.pipeAccent }]} />
             </View>
 
             {/* Bottom pipe */}
@@ -688,95 +426,55 @@ export default function FlappybaraGame() {
                   left: pipe.x,
                   top: pipe.topHeight + PIPE_GAP,
                   height: SCREEN_HEIGHT - pipe.topHeight - PIPE_GAP - GROUND_HEIGHT,
-                  backgroundColor: pipeColor,
-                  borderRightColor: pipeAccentColor,
+                  backgroundColor: colors.pipe,
+                  borderRightColor: colors.pipeAccent,
                 },
               ]}
             >
-              <View style={[styles.pipeBottom, { backgroundColor: pipeColor, borderColor: pipeAccentColor }]} />
+              <View style={[styles.pipeBottom, { backgroundColor: colors.pipe, borderColor: colors.pipeAccent }]} />
             </View>
-          </View>
+          </React.Fragment>
         ))}
 
         {/* Ground */}
-        <View style={[styles.ground, { backgroundColor: groundColor }]}>
-          <View style={[styles.groundPattern, { backgroundColor: groundAccentColor }]} />
+        <View style={[styles.ground, { backgroundColor: colors.ground }]}>
+          <View style={[styles.groundPattern, { backgroundColor: colors.groundAccent }]} />
         </View>
 
         {/* Start/Game Over overlay */}
         {(!gameStarted || gameOver) && (
-          <View style={[styles.overlay, { backgroundColor: overlayColor }]}>
-            <Text style={[styles.title, { color: textColor }]}>Flappybara</Text>
+          <View style={[styles.overlay, { backgroundColor: colors.overlay }]}>
+            <Text style={[styles.title, { color: colors.text }]}>Flappybara</Text>
             
             {gameOver && (
               <View style={styles.gameOverContainer}>
-                <Text style={[styles.gameOverText, { color: textColor }]}>Game Over!</Text>
-                <Text style={[styles.finalScore, { color: textColor }]}>Score: {score}</Text>
-                <Text style={[styles.highScoreText, { color: textColor }]}>High Score: {highScore}</Text>
+                <Text style={[styles.gameOverText, { color: colors.text }]}>Game Over!</Text>
+                <Text style={[styles.finalScore, { color: colors.text }]}>Score: {score}</Text>
+                <Text style={[styles.highScoreText, { color: colors.text }]}>High Score: {highScore}</Text>
               </View>
             )}
 
             {!gameStarted && !gameOver && (
-              <Text style={[styles.instructions, { color: textColor }]}>
+              <Text style={[styles.instructions, { color: colors.text }]}>
                 Tap anywhere to start{'\n'}Keep tapping to fly!
               </Text>
             )}
 
             <TouchableOpacity
-              style={[styles.startButton, { backgroundColor: buttonColor }]}
+              style={[styles.startButton, { backgroundColor: colors.button }]}
               onPress={startGame}
             >
-              <Text style={[styles.startButtonText, { color: buttonTextColor }]}>
+              <Text style={[styles.startButtonText, { color: colors.buttonText }]}>
                 {gameOver ? 'Play Again' : 'Start Game'}
               </Text>
             </TouchableOpacity>
 
             {highScore > 0 && !gameOver && (
-              <Text style={[styles.highScoreSmall, { color: textColor }]}>
+              <Text style={[styles.highScoreSmall, { color: colors.text }]}>
                 High Score: {highScore}
               </Text>
             )}
           </View>
-        )}
-
-        {/* Rewarded Ad Modal - Watch to Continue (only on native) */}
-        {Platform.OS !== 'web' && (
-          <Modal
-            visible={showRewardedAdModal}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={declineRewardedAd}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={[styles.modalContent, { backgroundColor: overlayColor }]}>
-                <Text style={[styles.modalTitle, { color: textColor }]}>Game Over!</Text>
-                <Text style={[styles.modalScore, { color: textColor }]}>Score: {score}</Text>
-                <Text style={[styles.modalMessage, { color: textColor }]}>
-                  Watch an ad to continue playing?
-                </Text>
-                
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.watchAdButton, { backgroundColor: buttonColor }]}
-                    onPress={watchRewardedAd}
-                  >
-                    <Text style={[styles.modalButtonText, { color: buttonTextColor }]}>
-                      Watch Ad
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.declineButton, { backgroundColor: '#e74c3c' }]}
-                    onPress={declineRewardedAd}
-                  >
-                    <Text style={[styles.modalButtonText, { color: buttonTextColor }]}>
-                      No Thanks
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </Modal>
         )}
       </Pressable>
     </GestureDetector>
@@ -787,23 +485,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  bannerContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
   scoreContainer: {
     position: 'absolute',
     top: Platform.OS === 'android' ? 60 : 80,
     alignSelf: 'center',
     zIndex: 100,
-  },
-  scoreContainerWithBanner: {
-    top: Platform.OS === 'android' ? 120 : 140,
   },
   scoreText: {
     fontSize: 48,
@@ -932,63 +618,6 @@ const styles = StyleSheet.create({
   },
   startButtonText: {
     fontSize: 20,
-    fontWeight: 'bold',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    width: '80%',
-    padding: 30,
-    borderRadius: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  modalScore: {
-    fontSize: 24,
-    marginBottom: 20,
-  },
-  modalMessage: {
-    fontSize: 18,
-    textAlign: 'center',
-    marginBottom: 30,
-    lineHeight: 24,
-  },
-  modalButtons: {
-    width: '100%',
-    gap: 12,
-  },
-  modalButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  watchAdButton: {
-    marginBottom: 8,
-  },
-  declineButton: {
-    opacity: 0.9,
-  },
-  modalButtonText: {
-    fontSize: 18,
     fontWeight: 'bold',
   },
 });
