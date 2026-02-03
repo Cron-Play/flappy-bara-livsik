@@ -1,9 +1,8 @@
-
 {
   "expo": {
     "name": "FlappyBara",
     "slug": "flappy-bara-livsik",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/final_quest_240x240.png",
     "userInterfaceStyle": "automatic",
@@ -26,7 +25,8 @@
         "backgroundColor": "#87CEEB"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.cronplay.flappybara"
+      "package": "com.cronplay.flappybara",
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/images/final_quest_240x240.png",
@@ -35,7 +35,14 @@
     "plugins": [
       "expo-font",
       "expo-router",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
+      ]
     ],
     "scheme": "FlappyBara",
     "experiments": {
@@ -43,7 +50,7 @@
     },
     "extra": {
       "router": {},
-      "backendUrl": "https://636bvpfhk6bt9fkbkbk59tqbgfc8tdph.app.specular.dev"
+      "backendUrl": "https://prod-proj-dcvaspbrsbzmmethrkmpm-liwg5h36mq-ey.a.run.app"
     }
   }
 }
