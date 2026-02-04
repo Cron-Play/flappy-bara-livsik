@@ -24,6 +24,29 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// Conditional AdMob import for native platforms only
+let BannerAd: any = null;
+let BannerAdSize: any = null;
+let TestIds: any = null;
+
+if (Platform.OS !== 'web') {
+  try {
+    const adMobModule = require('react-native-google-mobile-ads');
+    BannerAd = adMobModule.BannerAd;
+    BannerAdSize = adMobModule.BannerAdSize;
+    TestIds = adMobModule.TestIds;
+    
+    // Initialize AdMob
+    adMobModule.default().initialize().then((status: any) => {
+      console.log('AdMob initialized:', status);
+    }).catch((error: any) => {
+      console.error('AdMob initialization failed:', error);
+    });
+  } catch (error) {
+    console.warn('react-native-google-mobile-ads not available:', error);
+  }
+}
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Game constants - ADJUSTED FOR SMOOTHER, LESS VIOLENT GAMEPLAY
@@ -337,53 +360,73 @@ export default function FlappybaraGame() {
   }, []);
 
   return (
-    <GestureDetector gesture={tapGesture}>
-      <Pressable 
-        style={[styles.container, { backgroundColor: colors.background }]}
-        onPress={handleScreenTap}
-      >
-        {/* Clouds in background - Enhanced visibility */}
-        {clouds.map((cloud, index) => (
-          <React.Fragment key={index}>
-            <View
-              style={[
-                styles.cloud,
-                {
-                  left: cloud.x,
-                  top: cloud.y,
-                  width: cloud.size,
-                  height: cloud.size * 0.6,
-                  backgroundColor: colors.cloud,
-                },
-              ]}
-            >
+    <View style={styles.wrapper}>
+      {/* AdMob Banner at the top - only on native platforms */}
+      {Platform.OS !== 'web' && BannerAd && TestIds && (
+        <View style={styles.bannerContainer}>
+          <BannerAd
+            unitId={TestIds.BANNER}
+            size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+            requestOptions={{
+              requestNonPersonalizedAdsOnly: true,
+            }}
+            onAdLoaded={() => {
+              console.log('Banner ad loaded');
+            }}
+            onAdFailedToLoad={(error: any) => {
+              console.error('Banner ad failed to load:', error);
+            }}
+          />
+        </View>
+      )}
+      
+      <GestureDetector gesture={tapGesture}>
+        <Pressable 
+          style={[styles.container, { backgroundColor: colors.background }]}
+          onPress={handleScreenTap}
+        >
+          {/* Clouds in background - Enhanced visibility */}
+          {clouds.map((cloud, index) => (
+            <React.Fragment key={index}>
               <View
                 style={[
-                  styles.cloudPart,
+                  styles.cloud,
                   {
-                    left: cloud.size * 0.2,
-                    top: cloud.size * 0.1,
-                    width: cloud.size * 0.4,
-                    height: cloud.size * 0.4,
+                    left: cloud.x,
+                    top: cloud.y,
+                    width: cloud.size,
+                    height: cloud.size * 0.6,
                     backgroundColor: colors.cloud,
                   },
                 ]}
-              />
-              <View
-                style={[
-                  styles.cloudPart,
-                  {
-                    right: cloud.size * 0.2,
-                    top: cloud.size * 0.05,
-                    width: cloud.size * 0.35,
-                    height: cloud.size * 0.35,
-                    backgroundColor: colors.cloud,
-                  },
-                ]}
-              />
-            </View>
-          </React.Fragment>
-        ))}
+              >
+                <View
+                  style={[
+                    styles.cloudPart,
+                    {
+                      left: cloud.size * 0.2,
+                      top: cloud.size * 0.1,
+                      width: cloud.size * 0.4,
+                      height: cloud.size * 0.4,
+                      backgroundColor: colors.cloud,
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.cloudPart,
+                    {
+                      right: cloud.size * 0.2,
+                      top: cloud.size * 0.05,
+                      width: cloud.size * 0.35,
+                      height: cloud.size * 0.35,
+                      backgroundColor: colors.cloud,
+                    },
+                  ]}
+                />
+              </View>
+            </React.Fragment>
+          ))}
 
         {/* Score */}
         <View style={styles.scoreContainer}>
@@ -476,18 +519,28 @@ export default function FlappybaraGame() {
             )}
           </View>
         )}
-      </Pressable>
-    </GestureDetector>
+        </Pressable>
+      </GestureDetector>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: {
+    flex: 1,
+  },
+  bannerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000',
+    zIndex: 1000,
+  },
   container: {
     flex: 1,
   },
   scoreContainer: {
     position: 'absolute',
-    top: Platform.OS === 'android' ? 60 : 80,
+    top: Platform.OS === 'android' ? 120 : 140,
     alignSelf: 'center',
     zIndex: 100,
   },
