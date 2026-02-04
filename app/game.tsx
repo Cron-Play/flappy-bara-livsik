@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,6 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withSequence,
-  Easing,
-  cancelAnimation,
-  runOnJS,
-  withRepeat,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -30,22 +26,16 @@ let BannerAdSize: any = null;
 let InterstitialAd: any = null;
 let AdEventType: any = null;
 let TestIds: any = null;
+let adMobModule: any = null;
 
 if (Platform.OS !== 'web') {
   try {
-    const adMobModule = require('react-native-google-mobile-ads');
+    adMobModule = require('react-native-google-mobile-ads');
     BannerAd = adMobModule.BannerAd;
     BannerAdSize = adMobModule.BannerAdSize;
     InterstitialAd = adMobModule.InterstitialAd;
     AdEventType = adMobModule.AdEventType;
     TestIds = adMobModule.TestIds;
-    
-    // Initialize AdMob
-    adMobModule.default().initialize().then((status: any) => {
-      console.log('AdMob initialized:', status);
-    }).catch((error: any) => {
-      console.error('AdMob initialization failed:', error);
-    });
   } catch (error) {
     console.warn('react-native-google-mobile-ads not available:', error);
   }
@@ -97,10 +87,12 @@ export default function FlappybaraGame() {
   const [score, setScore] = useState(0);
   const [highScore, setHighScore] = useState(0);
   const [gameCount, setGameCount] = useState(0);
+  const [adMobInitialized, setAdMobInitialized] = useState(false);
 
   // Interstitial ad state
   const [interstitialLoaded, setInterstitialLoaded] = useState(false);
   const interstitialAdRef = useRef<any>(null);
+  const adEventUnsubscribers = useRef<Array<() => void>>([]);
 
   // Bird physics
   const birdY = useSharedValue(SCREEN_HEIGHT / 2 - 100);
@@ -116,7 +108,8 @@ export default function FlappybaraGame() {
   const cloudUpdateTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Game loop
-  const gameLoopRef = useRef<NodeJS.Timeout | null>(null);
+  const gameLoopRef = useRef<number | null>(null);
+  const lastFrameTime = useRef<number>(Date.now());
 
   // Colors based on theme
   const colors = {
@@ -134,27 +127,54 @@ export default function FlappybaraGame() {
     cloud: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.9)',
   };
 
+  // Initialize AdMob
+  useEffect(() => {
+    if (Platform.OS !== 'web' && adMobModule) {
+      adMobModule
+        .default()
+        .initialize()
+        .then((status: any) => {
+          console.log('AdMob initialized:', status);
+          setAdMobInitialized(true);
+        })
+        .catch((error: any) => {
+          console.error('AdMob initialization failed:', error);
+        });
+    }
+  }, []);
+
   // Load high score and game count from storage on mount
   useEffect(() => {
     loadHighScore();
     loadGameCount();
   }, []);
 
-  // Initialize interstitial ad
+  // Initialize interstitial ad after AdMob is initialized
   useEffect(() => {
-    if (Platform.OS !== 'web' && InterstitialAd && TestIds) {
+    if (adMobInitialized && Platform.OS !== 'web' && InterstitialAd && TestIds) {
       loadInterstitialAd();
     }
-  }, []);
+    
+    return () => {
+      // Cleanup ad event listeners
+      adEventUnsubscribers.current.forEach((unsubscribe) => {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error('Error unsubscribing from ad event:', error);
+        }
+      });
+      adEventUnsubscribers.current = [];
+    };
+  }, [adMobInitialized]);
 
-  const loadInterstitialAd = () => {
+  const loadInterstitialAd = useCallback(() => {
     if (Platform.OS === 'web' || !InterstitialAd || !TestIds) {
       return;
     }
 
     try {
       // Create interstitial ad instance
-      // Using test ad ID - replace with your actual ad ID when live
       const interstitial = InterstitialAd.createForAdRequest(TestIds.INTERSTITIAL, {
         requestNonPersonalizedAdsOnly: true,
       });
@@ -179,22 +199,18 @@ export default function FlappybaraGame() {
         setTimeout(() => loadInterstitialAd(), 5000);
       });
 
+      // Store unsubscribers for cleanup
+      adEventUnsubscribers.current.push(unsubscribeLoaded, unsubscribeClosed, unsubscribeError);
+
       // Load the ad
       interstitial.load();
       interstitialAdRef.current = interstitial;
-
-      // Cleanup function
-      return () => {
-        unsubscribeLoaded();
-        unsubscribeClosed();
-        unsubscribeError();
-      };
     } catch (error) {
       console.error('Error loading interstitial ad:', error);
     }
-  };
+  }, []);
 
-  const showInterstitialAd = () => {
+  const showInterstitialAd = useCallback(() => {
     if (Platform.OS === 'web' || !interstitialAdRef.current || !interstitialLoaded) {
       console.log('Interstitial ad not ready to show');
       return;
@@ -206,7 +222,7 @@ export default function FlappybaraGame() {
     } catch (error) {
       console.error('Error showing interstitial ad:', error);
     }
-  };
+  }, [interstitialLoaded]);
 
   const loadHighScore = async () => {
     try {
@@ -303,8 +319,124 @@ export default function FlappybaraGame() {
     };
   });
 
+  // End game callback
+  const endGame = useCallback(() => {
+    console.log('Game over - Score:', score);
+    
+    if (gameLoopRef.current !== null) {
+      cancelAnimationFrame(gameLoopRef.current);
+      gameLoopRef.current = null;
+    }
+    
+    if (pipeGenerationTimer.current) {
+      clearInterval(pipeGenerationTimer.current);
+      pipeGenerationTimer.current = null;
+    }
+    
+    setGameOver(true);
+    setGameStarted(false);
+    
+    // Increment game count and potentially show ad
+    incrementGameCount();
+    
+    if (score > highScore) {
+      setHighScore(score);
+      saveHighScore(score);
+      console.log('New high score:', score);
+    }
+  }, [score, highScore, gameCount, showInterstitialAd]);
+
+  // Game loop using requestAnimationFrame for smooth performance
+  const gameLoop = useCallback(() => {
+    const now = Date.now();
+    const deltaTime = (now - lastFrameTime.current) / 16.67; // Normalize to 60fps
+    lastFrameTime.current = now;
+
+    // Update bird physics
+    birdVelocity.current += GRAVITY * deltaTime;
+    const newBirdY = birdY.value + birdVelocity.current * deltaTime;
+    birdY.value = newBirdY;
+
+    // Update bird rotation based on velocity
+    const targetRotation = Math.min(Math.max(birdVelocity.current * 2.5, -25), 70);
+    birdRotation.value = withTiming(targetRotation, { duration: 150 });
+
+    // Collision detection with margin
+    const collisionMargin = 5;
+    const birdLeft = SCREEN_WIDTH / 2 - BIRD_SIZE / 2 + collisionMargin;
+    const birdRight = SCREEN_WIDTH / 2 + BIRD_SIZE / 2 - collisionMargin;
+    const birdTop = newBirdY + collisionMargin;
+    const birdBottom = newBirdY + BIRD_SIZE - collisionMargin;
+
+    // Check ground collision
+    if (birdBottom >= SCREEN_HEIGHT - GROUND_HEIGHT) {
+      console.log('Collision detected: Bird hit ground');
+      endGame();
+      return;
+    }
+
+    // Check ceiling collision
+    if (birdTop <= 0) {
+      console.log('Collision detected: Bird hit ceiling');
+      endGame();
+      return;
+    }
+
+    // Update pipes and check collisions
+    let shouldEndGame = false;
+    let newScore = score;
+
+    setPipes((prevPipes) => {
+      const updatedPipes = prevPipes
+        .map((pipe) => {
+          const newX = pipe.x - PIPE_SPEED * deltaTime;
+
+          // Check if bird passed pipe
+          if (!pipe.passed && newX + PIPE_WIDTH < SCREEN_WIDTH / 2 - BIRD_SIZE / 2) {
+            newScore = score + 1;
+            return { ...pipe, x: newX, passed: true };
+          }
+
+          // Collision detection
+          const pipeLeft = newX;
+          const pipeRight = newX + PIPE_WIDTH;
+
+          const horizontalOverlap = birdRight > pipeLeft && birdLeft < pipeRight;
+
+          if (horizontalOverlap) {
+            const hitTopPipe = birdTop < pipe.topHeight;
+            const hitBottomPipe = birdBottom > pipe.topHeight + PIPE_GAP;
+
+            if (hitTopPipe || hitBottomPipe) {
+              console.log('Collision detected: Bird hit pipe at x:', newX);
+              shouldEndGame = true;
+            }
+          }
+
+          return { ...pipe, x: newX };
+        })
+        .filter((pipe) => pipe.x > -PIPE_WIDTH);
+
+      return updatedPipes;
+    });
+
+    // Update score if changed
+    if (newScore !== score) {
+      setScore(newScore);
+    }
+
+    // End game if collision detected
+    if (shouldEndGame) {
+      endGame();
+      return;
+    }
+
+    // Continue game loop
+    gameLoopRef.current = requestAnimationFrame(gameLoop);
+  }, [score, endGame]);
+
   // Start game
-  const startGame = () => {
+  const startGame = useCallback(() => {
     console.log('User started new game');
     setGameStarted(true);
     setGameOver(false);
@@ -313,6 +445,7 @@ export default function FlappybaraGame() {
     birdVelocity.current = 0;
     birdRotation.value = 0;
     setPipes([]);
+    lastFrameTime.current = Date.now();
     
     // Start pipe generation
     pipeGenerationTimer.current = setInterval(() => {
@@ -320,8 +453,8 @@ export default function FlappybaraGame() {
     }, 2000);
 
     // Start game loop
-    startGameLoop();
-  };
+    gameLoopRef.current = requestAnimationFrame(gameLoop);
+  }, [gameLoop]);
 
   // Generate new pipe
   const generatePipe = () => {
@@ -339,99 +472,8 @@ export default function FlappybaraGame() {
     ]);
   };
 
-  // Game loop
-  const startGameLoop = () => {
-    gameLoopRef.current = setInterval(() => {
-      // Update bird physics
-      birdVelocity.current += GRAVITY;
-      birdY.value += birdVelocity.current;
-
-      // Update bird rotation based on velocity
-      const targetRotation = Math.min(Math.max(birdVelocity.current * 2.5, -25), 70);
-      birdRotation.value = withTiming(targetRotation, { duration: 150 });
-
-      // Collision detection with margin
-      const collisionMargin = 5;
-      const birdLeft = SCREEN_WIDTH / 2 - BIRD_SIZE / 2 + collisionMargin;
-      const birdRight = SCREEN_WIDTH / 2 + BIRD_SIZE / 2 - collisionMargin;
-      const birdTop = birdY.value + collisionMargin;
-      const birdBottom = birdY.value + BIRD_SIZE - collisionMargin;
-
-      // Check ground collision
-      if (birdBottom >= SCREEN_HEIGHT - GROUND_HEIGHT) {
-        console.log('Collision detected: Bird hit ground');
-        endGame();
-        return;
-      }
-
-      // Check ceiling collision
-      if (birdTop <= 0) {
-        console.log('Collision detected: Bird hit ceiling');
-        endGame();
-        return;
-      }
-
-      // Update pipes
-      setPipes((prevPipes) => {
-        const updatedPipes = prevPipes
-          .map((pipe) => {
-            const newX = pipe.x - PIPE_SPEED;
-
-            // Check if bird passed pipe
-            if (!pipe.passed && newX + PIPE_WIDTH < SCREEN_WIDTH / 2 - BIRD_SIZE / 2) {
-              setScore((s) => s + 1);
-              return { ...pipe, x: newX, passed: true };
-            }
-
-            // Collision detection
-            const pipeLeft = newX;
-            const pipeRight = newX + PIPE_WIDTH;
-
-            const horizontalOverlap = birdRight > pipeLeft && birdLeft < pipeRight;
-
-            if (horizontalOverlap) {
-              const hitTopPipe = birdTop < pipe.topHeight;
-              const hitBottomPipe = birdBottom > pipe.topHeight + PIPE_GAP;
-
-              if (hitTopPipe || hitBottomPipe) {
-                console.log('Collision detected: Bird hit pipe at x:', newX);
-                endGame();
-              }
-            }
-
-            return { ...pipe, x: newX };
-          })
-          .filter((pipe) => pipe.x > -PIPE_WIDTH);
-
-        return updatedPipes;
-      });
-    }, 1000 / 60);
-  };
-
-  // End game
-  const endGame = () => {
-    console.log('Game over - Score:', score);
-    if (gameLoopRef.current) {
-      clearInterval(gameLoopRef.current);
-    }
-    if (pipeGenerationTimer.current) {
-      clearInterval(pipeGenerationTimer.current);
-    }
-    setGameOver(true);
-    setGameStarted(false);
-    
-    // Increment game count and potentially show ad
-    incrementGameCount();
-    
-    if (score > highScore) {
-      setHighScore(score);
-      saveHighScore(score);
-      console.log('New high score:', score);
-    }
-  };
-
   // Jump
-  const jump = () => {
+  const jump = useCallback(() => {
     if (!gameStarted || gameOver) return;
     console.log('User tapped to jump');
     birdVelocity.current = JUMP_VELOCITY;
@@ -439,26 +481,26 @@ export default function FlappybaraGame() {
       withTiming(-25, { duration: 150 }),
       withTiming(0, { duration: 250 })
     );
-  };
+  }, [gameStarted, gameOver]);
 
   // Handle screen tap
-  const handleScreenTap = () => {
+  const handleScreenTap = useCallback(() => {
     console.log('User tapped screen');
     if (gameStarted && !gameOver) {
       jump();
     }
-  };
+  }, [gameStarted, gameOver, jump]);
 
   // Tap gesture for the entire screen
   const tapGesture = Gesture.Tap().onStart(() => {
-    runOnJS(handleScreenTap)();
+    handleScreenTap();
   });
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (gameLoopRef.current) {
-        clearInterval(gameLoopRef.current);
+      if (gameLoopRef.current !== null) {
+        cancelAnimationFrame(gameLoopRef.current);
       }
       if (pipeGenerationTimer.current) {
         clearInterval(pipeGenerationTimer.current);
@@ -466,13 +508,20 @@ export default function FlappybaraGame() {
     };
   }, []);
 
+  // Atomic JSX - calculate text values outside JSX
   const gameCountText = `Games played: ${gameCount}`;
-  const nextAdText = gameCount % 3 === 0 ? 'Ad shown!' : `Next ad in ${3 - (gameCount % 3)} games`;
+  const gamesUntilAd = 3 - (gameCount % 3);
+  const nextAdText = gameCount % 3 === 0 ? 'Ad shown!' : `Next ad in ${gamesUntilAd} games`;
+  const highScoreDisplayText = `High Score: ${highScore}`;
+  const finalScoreText = `Score: ${score}`;
+  const instructionsLine1 = 'Tap anywhere to start';
+  const instructionsLine2 = 'Keep tapping to fly!';
+  const startButtonText = gameOver ? 'Play Again' : 'Start Game';
 
   return (
     <View style={styles.wrapper}>
       {/* AdMob Banner at the top - only on native platforms */}
-      {Platform.OS !== 'web' && BannerAd && TestIds && (
+      {Platform.OS !== 'web' && BannerAd && TestIds && adMobInitialized && (
         <View style={styles.bannerContainer}>
           <BannerAd
             unitId={TestIds.BANNER}
@@ -496,17 +545,34 @@ export default function FlappybaraGame() {
           onPress={handleScreenTap}
         >
           {/* Clouds in background */}
-          {clouds.map((cloud, index) => (
-            <React.Fragment key={index}>
+          {clouds.map((cloud, index) => {
+            const cloudLeftPos = cloud.x;
+            const cloudTopPos = cloud.y;
+            const cloudWidth = cloud.size;
+            const cloudHeight = cloud.size * 0.6;
+            const cloudColor = colors.cloud;
+            
+            const cloudPart1Left = cloud.size * 0.2;
+            const cloudPart1Top = cloud.size * 0.1;
+            const cloudPart1Width = cloud.size * 0.4;
+            const cloudPart1Height = cloud.size * 0.4;
+            
+            const cloudPart2Right = cloud.size * 0.2;
+            const cloudPart2Top = cloud.size * 0.05;
+            const cloudPart2Width = cloud.size * 0.35;
+            const cloudPart2Height = cloud.size * 0.35;
+            
+            return (
               <View
+                key={index}
                 style={[
                   styles.cloud,
                   {
-                    left: cloud.x,
-                    top: cloud.y,
-                    width: cloud.size,
-                    height: cloud.size * 0.6,
-                    backgroundColor: colors.cloud,
+                    left: cloudLeftPos,
+                    top: cloudTopPos,
+                    width: cloudWidth,
+                    height: cloudHeight,
+                    backgroundColor: cloudColor,
                   },
                 ]}
               >
@@ -514,11 +580,11 @@ export default function FlappybaraGame() {
                   style={[
                     styles.cloudPart,
                     {
-                      left: cloud.size * 0.2,
-                      top: cloud.size * 0.1,
-                      width: cloud.size * 0.4,
-                      height: cloud.size * 0.4,
-                      backgroundColor: colors.cloud,
+                      left: cloudPart1Left,
+                      top: cloudPart1Top,
+                      width: cloudPart1Width,
+                      height: cloudPart1Height,
+                      backgroundColor: cloudColor,
                     },
                   ]}
                 />
@@ -526,111 +592,121 @@ export default function FlappybaraGame() {
                   style={[
                     styles.cloudPart,
                     {
-                      right: cloud.size * 0.2,
-                      top: cloud.size * 0.05,
-                      width: cloud.size * 0.35,
-                      height: cloud.size * 0.35,
-                      backgroundColor: colors.cloud,
+                      right: cloudPart2Right,
+                      top: cloudPart2Top,
+                      width: cloudPart2Width,
+                      height: cloudPart2Height,
+                      backgroundColor: cloudColor,
                     },
                   ]}
                 />
               </View>
-            </React.Fragment>
-          ))}
+            );
+          })}
 
-        {/* Score */}
-        <View style={styles.scoreContainer}>
-          <Text style={[styles.scoreText, { color: colors.text }]}>{score}</Text>
-        </View>
-
-        {/* Capybara */}
-        <Animated.View style={[styles.bird, birdStyle]}>
-          <Image
-            source={require('@/assets/images/52b1c166-be40-4bd1-be77-9f6625ab8726.png')}
-            style={styles.capybaraImage}
-            resizeMode="contain"
-          />
-        </Animated.View>
-
-        {/* Pipes */}
-        {pipes.map((pipe, index) => (
-          <React.Fragment key={index}>
-            {/* Top pipe */}
-            <View
-              style={[
-                styles.pipe,
-                {
-                  left: pipe.x,
-                  top: 0,
-                  height: pipe.topHeight,
-                  backgroundColor: colors.pipe,
-                  borderRightColor: colors.pipeAccent,
-                },
-              ]}
-            >
-              <View style={[styles.pipeTop, { backgroundColor: colors.pipe, borderColor: colors.pipeAccent }]} />
-            </View>
-
-            {/* Bottom pipe */}
-            <View
-              style={[
-                styles.pipe,
-                {
-                  left: pipe.x,
-                  top: pipe.topHeight + PIPE_GAP,
-                  height: SCREEN_HEIGHT - pipe.topHeight - PIPE_GAP - GROUND_HEIGHT,
-                  backgroundColor: colors.pipe,
-                  borderRightColor: colors.pipeAccent,
-                },
-              ]}
-            >
-              <View style={[styles.pipeBottom, { backgroundColor: colors.pipe, borderColor: colors.pipeAccent }]} />
-            </View>
-          </React.Fragment>
-        ))}
-
-        {/* Ground */}
-        <View style={[styles.ground, { backgroundColor: colors.ground }]}>
-          <View style={[styles.groundPattern, { backgroundColor: colors.groundAccent }]} />
-        </View>
-
-        {/* Start/Game Over overlay */}
-        {(!gameStarted || gameOver) && (
-          <View style={[styles.overlay, { backgroundColor: colors.overlay }]}>
-            <Text style={[styles.title, { color: colors.text }]}>Flappybara</Text>
-            
-            {gameOver && (
-              <View style={styles.gameOverContainer}>
-                <Text style={[styles.gameOverText, { color: colors.text }]}>Game Over!</Text>
-                <Text style={[styles.finalScore, { color: colors.text }]}>Score: {score}</Text>
-                <Text style={[styles.highScoreText, { color: colors.text }]}>High Score: {highScore}</Text>
-                <Text style={[styles.adInfoText, { color: colors.text }]}>{gameCountText}</Text>
-                <Text style={[styles.adInfoText, { color: colors.text }]}>{nextAdText}</Text>
-              </View>
-            )}
-
-            {!gameStarted && !gameOver && (
-              <Text style={[styles.instructions, { color: colors.text }]}>
-                Tap anywhere to start{'\n'}Keep tapping to fly!
-              </Text>
-            )}
-
-            <TouchableOpacity
-              style={[styles.startButton, { backgroundColor: colors.button }]}
-              onPress={startGame}
-            >
-              <Text style={[styles.startButtonText, { color: colors.buttonText }]}>
-                {gameOver ? 'Play Again' : 'Start Game'}
-              </Text>
-            </TouchableOpacity>
-
-            {highScore > 0 && !gameOver && (
-              <Text style={[styles.highScoreSmall, { color: colors.text }]}>
-                High Score: {highScore}
-              </Text>
-            )}
+          {/* Score */}
+          <View style={styles.scoreContainer}>
+            <Text style={[styles.scoreText, { color: colors.text }]}>{score}</Text>
           </View>
-        )}
+
+          {/* Capybara */}
+          <Animated.View style={[styles.bird, birdStyle]}>
+            <Image
+              source={require('@/assets/images/52b1c166-be40-4bd1-be77-9f6625ab8726.png')}
+              style={styles.capybaraImage}
+              resizeMode="contain"
+            />
+          </Animated.View>
+
+          {/* Pipes */}
+          {pipes.map((pipe, index) => {
+            const pipeLeft = pipe.x;
+            const pipeTopHeight = pipe.topHeight;
+            const pipeBottomTop = pipe.topHeight + PIPE_GAP;
+            const pipeBottomHeight = SCREEN_HEIGHT - pipe.topHeight - PIPE_GAP - GROUND_HEIGHT;
+            const pipeColor = colors.pipe;
+            const pipeAccentColor = colors.pipeAccent;
+            
+            return (
+              <React.Fragment key={index}>
+                {/* Top pipe */}
+                <View
+                  style={[
+                    styles.pipe,
+                    {
+                      left: pipeLeft,
+                      top: 0,
+                      height: pipeTopHeight,
+                      backgroundColor: pipeColor,
+                      borderRightColor: pipeAccentColor,
+                    },
+                  ]}
+                >
+                  <View style={[styles.pipeTop, { backgroundColor: pipeColor, borderColor: pipeAccentColor }]} />
+                </View>
+
+                {/* Bottom pipe */}
+                <View
+                  style={[
+                    styles.pipe,
+                    {
+                      left: pipeLeft,
+                      top: pipeBottomTop,
+                      height: pipeBottomHeight,
+                      backgroundColor: pipeColor,
+                      borderRightColor: pipeAccentColor,
+                    },
+                  ]}
+                >
+                  <View style={[styles.pipeBottom, { backgroundColor: pipeColor, borderColor: pipeAccentColor }]} />
+                </View>
+              </React.Fragment>
+            );
+          })}
+
+          {/* Ground */}
+          <View style={[styles.ground, { backgroundColor: colors.ground }]}>
+            <View style={[styles.groundPattern, { backgroundColor: colors.groundAccent }]} />
+          </View>
+
+          {/* Start/Game Over overlay */}
+          {(!gameStarted || gameOver) && (
+            <View style={[styles.overlay, { backgroundColor: colors.overlay }]}>
+              <Text style={[styles.title, { color: colors.text }]}>Flappybara</Text>
+              
+              {gameOver && (
+                <View style={styles.gameOverContainer}>
+                  <Text style={[styles.gameOverText, { color: colors.text }]}>Game Over!</Text>
+                  <Text style={[styles.finalScore, { color: colors.text }]}>{finalScoreText}</Text>
+                  <Text style={[styles.highScoreText, { color: colors.text }]}>{highScoreDisplayText}</Text>
+                  <Text style={[styles.adInfoText, { color: colors.text }]}>{gameCountText}</Text>
+                  <Text style={[styles.adInfoText, { color: colors.text }]}>{nextAdText}</Text>
+                </View>
+              )}
+
+              {!gameStarted && !gameOver && (
+                <View style={styles.instructionsContainer}>
+                  <Text style={[styles.instructions, { color: colors.text }]}>{instructionsLine1}</Text>
+                  <Text style={[styles.instructions, { color: colors.text }]}>{instructionsLine2}</Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={[styles.startButton, { backgroundColor: colors.button }]}
+                onPress={startGame}
+              >
+                <Text style={[styles.startButtonText, { color: colors.buttonText }]}>
+                  {startButtonText}
+                </Text>
+              </TouchableOpacity>
+
+              {highScore > 0 && !gameOver && (
+                <Text style={[styles.highScoreSmall, { color: colors.text }]}>
+                  {highScoreDisplayText}
+                </Text>
+              )}
+            </View>
+          )}
         </Pressable>
       </GestureDetector>
     </View>
@@ -742,10 +818,13 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 2, height: 2 },
     textShadowRadius: 4,
   },
+  instructionsContainer: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
   instructions: {
     fontSize: 18,
     textAlign: 'center',
-    marginBottom: 30,
     paddingHorizontal: 40,
     lineHeight: 26,
   },
