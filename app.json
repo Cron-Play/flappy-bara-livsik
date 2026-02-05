@@ -1,14 +1,15 @@
+
 {
   "expo": {
     "name": "FlappyBara",
-    "slug": "flappy-bara-livsik",
+    "slug": "FlappyBara",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/final_quest_240x240.png",
+    "icon": "./assets/images/6a4fc89f-8d2d-4f9c-a4d6-899d431d339d.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/final_quest_240x240.png",
+      "image": "./assets/images/6a4fc89f-8d2d-4f9c-a4d6-899d431d339d.png",
       "resizeMode": "contain",
       "backgroundColor": "#87CEEB"
     },
@@ -24,7 +25,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/final_quest_240x240.png",
+        "foregroundImage": "./assets/images/6a4fc89f-8d2d-4f9c-a4d6-899d431d339d.png",
         "backgroundColor": "#87CEEB"
       },
       "edgeToEdgeEnabled": true,
@@ -34,7 +35,7 @@
       }
     },
     "web": {
-      "favicon": "./assets/images/final_quest_240x240.png",
+      "favicon": "./assets/images/6a4fc89f-8d2d-4f9c-a4d6-899d431d339d.png",
       "bundler": "metro"
     },
     "plugins": [
