@@ -10,6 +10,7 @@ import {
   Platform,
   Image,
   Pressable,
+  Modal,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -23,6 +24,15 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import mobileAds, {
+  BannerAd,
+  BannerAdSize,
+  TestIds,
+  InterstitialAd,
+  AdEventType,
+  RewardedAd,
+  RewardedAdEventType,
+} from 'react-native-google-mobile-ads';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -43,6 +53,12 @@ const CLOUD_MIN_SPEED = 0.3; // Slightly faster minimum
 const CLOUD_MAX_SPEED = 0.8; // Slightly faster maximum
 
 const HIGH_SCORE_KEY = '@flappybara_high_score';
+const RUN_COUNT_KEY = '@flappybara_run_count';
+
+// AdMob Ad Unit IDs (using test IDs for development)
+const BANNER_AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
+const INTERSTITIAL_AD_UNIT_ID = __DEV__ ? TestIds.INTERSTITIAL : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
+const REWARDED_AD_UNIT_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy';
 
 interface Pipe {
   x: number;
@@ -57,6 +73,16 @@ interface Cloud {
   speed: number;
 }
 
+// Create interstitial ad instance
+const interstitialAd = InterstitialAd.createForAdRequest(INTERSTITIAL_AD_UNIT_ID, {
+  requestNonPersonalizedAdsOnly: true,
+});
+
+// Create rewarded ad instance
+const rewardedAd = RewardedAd.createForAdRequest(REWARDED_AD_UNIT_ID, {
+  requestNonPersonalizedAdsOnly: true,
+});
+
 export default function FlappybaraGame() {
   console.log('User opened Flappybara game');
   
@@ -68,6 +94,12 @@ export default function FlappybaraGame() {
   const [gameOver, setGameOver] = useState(false);
   const [score, setScore] = useState(0);
   const [highScore, setHighScore] = useState(0);
+  const [runCount, setRunCount] = useState(0);
+  const [showRewardedAdModal, setShowRewardedAdModal] = useState(false);
+  const [hasUsedContinue, setHasUsedContinue] = useState(false);
+  const [interstitialLoaded, setInterstitialLoaded] = useState(false);
+  const [rewardedLoaded, setRewardedLoaded] = useState(false);
+  const [adsInitialized, setAdsInitialized] = useState(false);
 
   // Bird physics
   const birdY = useSharedValue(SCREEN_HEIGHT / 2 - 100);
@@ -101,10 +133,28 @@ export default function FlappybaraGame() {
     cloud: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.9)',
   };
 
-  // Load high score from storage on mount
+  // Initialize AdMob and load data on mount
   useEffect(() => {
+    initializeAds();
     loadHighScore();
+    loadRunCount();
   }, []);
+
+  const initializeAds = async () => {
+    try {
+      await mobileAds().initialize();
+      console.log('AdMob initialized successfully');
+      setAdsInitialized(true);
+      
+      // Load interstitial ad
+      loadInterstitialAd();
+      
+      // Load rewarded ad
+      loadRewardedAd();
+    } catch (error) {
+      console.error('Error initializing AdMob:', error);
+    }
+  };
 
   const loadHighScore = async () => {
     try {
@@ -126,6 +176,98 @@ export default function FlappybaraGame() {
     } catch (error) {
       console.error('Error saving high score:', error);
     }
+  };
+
+  const loadRunCount = async () => {
+    try {
+      const savedRunCount = await AsyncStorage.getItem(RUN_COUNT_KEY);
+      if (savedRunCount !== null) {
+        const parsedCount = parseInt(savedRunCount, 10);
+        setRunCount(parsedCount);
+        console.log('Loaded run count from storage:', parsedCount);
+      }
+    } catch (error) {
+      console.error('Error loading run count:', error);
+    }
+  };
+
+  const saveRunCount = async (newRunCount: number) => {
+    try {
+      await AsyncStorage.setItem(RUN_COUNT_KEY, newRunCount.toString());
+      console.log('Saved run count to storage:', newRunCount);
+    } catch (error) {
+      console.error('Error saving run count:', error);
+    }
+  };
+
+  // Load interstitial ad
+  const loadInterstitialAd = () => {
+    const unsubscribeLoaded = interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
+      console.log('Interstitial ad loaded');
+      setInterstitialLoaded(true);
+    });
+
+    const unsubscribeClosed = interstitialAd.addAdEventListener(AdEventType.CLOSED, () => {
+      console.log('Interstitial ad closed');
+      setInterstitialLoaded(false);
+      // Load a new ad for next time
+      interstitialAd.load();
+    });
+
+    const unsubscribeError = interstitialAd.addAdEventListener(AdEventType.ERROR, (error) => {
+      console.error('Interstitial ad error:', error);
+      setInterstitialLoaded(false);
+    });
+
+    // Start loading the ad
+    interstitialAd.load();
+
+    return () => {
+      unsubscribeLoaded();
+      unsubscribeClosed();
+      unsubscribeError();
+    };
+  };
+
+  // Load rewarded ad
+  const loadRewardedAd = () => {
+    const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      console.log('Rewarded ad loaded');
+      setRewardedLoaded(true);
+    });
+
+    const unsubscribeEarned = rewardedAd.addAdEventListener(
+      RewardedAdEventType.EARNED_REWARD,
+      (reward) => {
+        console.log('User earned reward:', reward);
+        // Continue the game
+        continueGame();
+      }
+    );
+
+    const unsubscribeClosed = rewardedAd.addAdEventListener(AdEventType.CLOSED, () => {
+      console.log('Rewarded ad closed');
+      setShowRewardedAdModal(false);
+      setRewardedLoaded(false);
+      // Load a new ad for next time
+      rewardedAd.load();
+    });
+
+    const unsubscribeError = rewardedAd.addAdEventListener(AdEventType.ERROR, (error) => {
+      console.error('Rewarded ad error:', error);
+      setRewardedLoaded(false);
+      setShowRewardedAdModal(false);
+    });
+
+    // Start loading the ad
+    rewardedAd.load();
+
+    return () => {
+      unsubscribeLoaded();
+      unsubscribeEarned();
+      unsubscribeClosed();
+      unsubscribeError();
+    };
   };
 
   // Initialize clouds on mount - Enhanced distribution
@@ -174,9 +316,22 @@ export default function FlappybaraGame() {
   // Start game
   const startGame = () => {
     console.log('User started new game');
+    
+    // Increment run count
+    const newRunCount = runCount + 1;
+    setRunCount(newRunCount);
+    saveRunCount(newRunCount);
+    
+    // Show interstitial ad every 3rd run
+    if (newRunCount % 3 === 0 && interstitialLoaded) {
+      console.log('Showing interstitial ad (run #' + newRunCount + ')');
+      interstitialAd.show();
+    }
+    
     setGameStarted(true);
     setGameOver(false);
     setScore(0);
+    setHasUsedContinue(false);
     birdY.value = SCREEN_HEIGHT / 2 - 100;
     birdVelocity.current = 0;
     birdRotation.value = 0;
@@ -289,6 +444,14 @@ export default function FlappybaraGame() {
     if (pipeGenerationTimer.current) {
       clearInterval(pipeGenerationTimer.current);
     }
+    
+    // Check if this is the first crash and user hasn't used continue yet
+    if (!hasUsedContinue && rewardedLoaded) {
+      console.log('First crash - offering rewarded ad to continue');
+      setShowRewardedAdModal(true);
+      return;
+    }
+    
     setGameOver(true);
     setGameStarted(false);
     
@@ -296,6 +459,50 @@ export default function FlappybaraGame() {
       setHighScore(score);
       saveHighScore(score);
       console.log('New high score:', score);
+    }
+  };
+
+  // Continue game after watching rewarded ad
+  const continueGame = () => {
+    console.log('User continuing game after watching ad');
+    setHasUsedContinue(true);
+    setShowRewardedAdModal(false);
+    
+    // Reset bird position and velocity
+    birdY.value = SCREEN_HEIGHT / 2 - 100;
+    birdVelocity.current = 0;
+    birdRotation.value = 0;
+    
+    // Clear pipes and restart
+    setPipes([]);
+    
+    // Restart game loop
+    startGameLoop();
+  };
+
+  // Handle declining the rewarded ad
+  const declineRewardedAd = () => {
+    console.log('User declined to watch ad');
+    setShowRewardedAdModal(false);
+    setGameOver(true);
+    setGameStarted(false);
+    
+    if (score > highScore) {
+      setHighScore(score);
+      saveHighScore(score);
+      console.log('New high score:', score);
+    }
+  };
+
+  // Watch rewarded ad
+  const watchRewardedAd = () => {
+    console.log('User chose to watch rewarded ad');
+    if (rewardedLoaded) {
+      rewardedAd.show();
+    } else {
+      console.error('Rewarded ad not loaded yet');
+      setShowRewardedAdModal(false);
+      declineRewardedAd();
     }
   };
 
@@ -342,6 +549,19 @@ export default function FlappybaraGame() {
         style={[styles.container, { backgroundColor: colors.background }]}
         onPress={handleScreenTap}
       >
+        {/* AdMob Banner at top */}
+        {adsInitialized && (
+          <View style={styles.bannerContainer}>
+            <BannerAd
+              unitId={BANNER_AD_UNIT_ID}
+              size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+              requestOptions={{
+                requestNonPersonalizedAdsOnly: true,
+              }}
+            />
+          </View>
+        )}
+
         {/* Clouds in background - Enhanced visibility */}
         {clouds.map((cloud, index) => (
           <React.Fragment key={index}>
@@ -385,8 +605,8 @@ export default function FlappybaraGame() {
           </React.Fragment>
         ))}
 
-        {/* Score */}
-        <View style={styles.scoreContainer}>
+        {/* Score - positioned below banner */}
+        <View style={[styles.scoreContainer, adsInitialized && styles.scoreContainerWithBanner]}>
           <Text style={[styles.scoreText, { color: colors.text }]}>{score}</Text>
         </View>
 
@@ -476,6 +696,44 @@ export default function FlappybaraGame() {
             )}
           </View>
         )}
+
+        {/* Rewarded Ad Modal - Watch to Continue */}
+        <Modal
+          visible={showRewardedAdModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={declineRewardedAd}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: colors.overlay }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Game Over!</Text>
+              <Text style={[styles.modalScore, { color: colors.text }]}>Score: {score}</Text>
+              <Text style={[styles.modalMessage, { color: colors.text }]}>
+                Watch an ad to continue playing?
+              </Text>
+              
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.watchAdButton, { backgroundColor: colors.button }]}
+                  onPress={watchRewardedAd}
+                >
+                  <Text style={[styles.modalButtonText, { color: colors.buttonText }]}>
+                    Watch Ad
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.declineButton, { backgroundColor: '#e74c3c' }]}
+                  onPress={declineRewardedAd}
+                >
+                  <Text style={[styles.modalButtonText, { color: colors.buttonText }]}>
+                    No Thanks
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </Pressable>
     </GestureDetector>
   );
@@ -485,11 +743,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  bannerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
   scoreContainer: {
     position: 'absolute',
     top: Platform.OS === 'android' ? 60 : 80,
     alignSelf: 'center',
     zIndex: 100,
+  },
+  scoreContainerWithBanner: {
+    top: Platform.OS === 'android' ? 120 : 140,
   },
   scoreText: {
     fontSize: 48,
@@ -618,6 +888,63 @@ const styles = StyleSheet.create({
   },
   startButtonText: {
     fontSize: 20,
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '80%',
+    padding: 30,
+    borderRadius: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  modalScore: {
+    fontSize: 24,
+    marginBottom: 20,
+  },
+  modalMessage: {
+    fontSize: 18,
+    textAlign: 'center',
+    marginBottom: 30,
+    lineHeight: 24,
+  },
+  modalButtons: {
+    width: '100%',
+    gap: 12,
+  },
+  modalButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  watchAdButton: {
+    marginBottom: 8,
+  },
+  declineButton: {
+    opacity: 0.9,
+  },
+  modalButtonText: {
+    fontSize: 18,
     fontWeight: 'bold',
   },
 });
